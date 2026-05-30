@@ -118,7 +118,8 @@ Fields:
 
 ## Enrichment Run
 
-Represents one module execution.
+Represents one passive enrichment execution for an entity. Module-level results are stored inside
+`result_json` so a run can show both successful modules and failed modules together.
 
 Fields:
 

@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from app.cases import router as cases_router
 from app.core.config import get_settings
 from app.db.sqlite import check_database, initialize_database
+from app.enrichment import router as enrichment_router
 
 
 @asynccontextmanager
@@ -21,6 +22,7 @@ app = FastAPI(
 )
 
 app.include_router(cases_router)
+app.include_router(enrichment_router)
 
 
 @app.get("/health")

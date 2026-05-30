@@ -12,6 +12,7 @@ import {
   draftFromEntity,
   emptyCreateCase,
   emptyEntity,
+  EnrichmentRunRecord,
   EntityFormState,
   EntityRecord,
   tagsFromInput,
@@ -45,9 +46,11 @@ export function CaseDashboard({ initialCases, initialApiOnline }: CaseDashboardP
     initialCases[0] ? draftFromCase(initialCases[0]) : null,
   );
   const [entities, setEntities] = useState<EntityRecord[]>([]);
+  const [enrichmentRuns, setEnrichmentRuns] = useState<EnrichmentRunRecord[]>([]);
   const [entityDraft, setEntityDraft] = useState<EntityFormState>(emptyEntity);
   const [editingEntityId, setEditingEntityId] = useState<string | null>(null);
   const [entityLoading, setEntityLoading] = useState(false);
+  const [enrichmentLoadingId, setEnrichmentLoadingId] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState(initialApiOnline ? "" : "Start the API to manage cases.");
 
@@ -62,6 +65,7 @@ export function CaseDashboard({ initialCases, initialApiOnline }: CaseDashboardP
     async function loadEntities() {
       if (!selectedCaseId) {
         setEntities([]);
+        setEnrichmentRuns([]);
         return;
       }
 
@@ -69,11 +73,13 @@ export function CaseDashboard({ initialCases, initialApiOnline }: CaseDashboardP
       setError("");
 
       try {
-        const nextEntities = await apiRequest<EntityRecord[]>(
-          `/cases/${selectedCaseId}/entities`,
-        );
+        const [nextEntities, nextEnrichmentRuns] = await Promise.all([
+          apiRequest<EntityRecord[]>(`/cases/${selectedCaseId}/entities`),
+          apiRequest<EnrichmentRunRecord[]>(`/cases/${selectedCaseId}/enrichment-runs`),
+        ]);
         if (!ignore) {
           setEntities(nextEntities);
+          setEnrichmentRuns(nextEnrichmentRuns);
         }
       } catch (caught) {
         if (!ignore) {
@@ -175,6 +181,7 @@ export function CaseDashboard({ initialCases, initialApiOnline }: CaseDashboardP
       setSelectedCaseId(nextSelected?.id ?? "");
       setCaseDraft(nextSelected ? draftFromCase(nextSelected) : null);
       setEntities([]);
+      setEnrichmentRuns([]);
       setNotice("Case deleted.");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not delete case.");
@@ -249,6 +256,9 @@ export function CaseDashboard({ initialCases, initialApiOnline }: CaseDashboardP
       setEntities((currentEntities) =>
         currentEntities.filter((currentEntity) => currentEntity.id !== entity.id),
       );
+      setEnrichmentRuns((currentRuns) =>
+        currentRuns.filter((run) => run.entity_id !== entity.id),
+      );
       setCases((currentCases) =>
         currentCases.map((caseRecord) =>
           caseRecord.id === entity.case_id
@@ -269,6 +279,43 @@ export function CaseDashboard({ initialCases, initialApiOnline }: CaseDashboardP
     }
   }
 
+  async function handleRunEnrichment(entity: EntityRecord) {
+    setError("");
+    setNotice("");
+    setEnrichmentLoadingId(entity.id);
+
+    try {
+      const run = await apiRequest<EnrichmentRunRecord>(
+        `/entities/${entity.id}/enrichment-runs`,
+        { method: "POST" },
+      );
+
+      setEnrichmentRuns((currentRuns) => [
+        run,
+        ...currentRuns.filter((currentRun) => currentRun.id !== run.id),
+      ]);
+      setCases((currentCases) =>
+        currentCases.map((caseRecord) =>
+          caseRecord.id === entity.case_id
+            ? {
+                ...caseRecord,
+                updated_at: run.created_at,
+              }
+            : caseRecord,
+        ),
+      );
+      setNotice(
+        run.status === "success"
+          ? "Enrichment completed."
+          : `Enrichment completed with ${run.status} status.`,
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not run enrichment.");
+    } finally {
+      setEnrichmentLoadingId(null);
+    }
+  }
+
   function selectCase(caseRecord: CaseSummary) {
     setSelectedCaseId(caseRecord.id);
     setCaseDraft(draftFromCase(caseRecord));
@@ -278,7 +325,12 @@ export function CaseDashboard({ initialCases, initialApiOnline }: CaseDashboardP
 
   return (
     <div className="oc-dashboard">
-      <OperationsOverview cases={cases} entities={entities} selectedCase={selectedCase} />
+      <OperationsOverview
+        cases={cases}
+        enrichmentRuns={enrichmentRuns}
+        entities={entities}
+        selectedCase={selectedCase}
+      />
 
       <div className="oc-workspace-grid">
         <CaseRail
@@ -300,6 +352,8 @@ export function CaseDashboard({ initialCases, initialApiOnline }: CaseDashboardP
         />
         <EntityPanel
           editingEntityId={editingEntityId}
+          enrichmentLoadingId={enrichmentLoadingId}
+          enrichmentRuns={enrichmentRuns}
           entities={entities}
           entityDraft={entityDraft}
           entityLoading={entityLoading}
@@ -314,21 +368,28 @@ export function CaseDashboard({ initialCases, initialApiOnline }: CaseDashboardP
             setEntityDraft(draftFromEntity(entity));
           }}
           onEntityDraftChange={setEntityDraft}
+          onRunEnrichment={(entity) => void handleRunEnrichment(entity)}
           onSaveEntity={handleSaveEntity}
         />
       </div>
 
-      <InvestigationScreens entities={entities} selectedCase={selectedCase} />
+      <InvestigationScreens
+        enrichmentRuns={enrichmentRuns}
+        entities={entities}
+        selectedCase={selectedCase}
+      />
     </div>
   );
 }
 
 function OperationsOverview({
   cases,
+  enrichmentRuns,
   entities,
   selectedCase,
 }: {
   cases: CaseSummary[];
+  enrichmentRuns: EnrichmentRunRecord[];
   entities: EntityRecord[];
   selectedCase: CaseSummary | null;
 }) {
@@ -352,9 +413,9 @@ function OperationsOverview({
         <div className="oc-stat-trend">Domains and URLs</div>
       </article>
       <article className="oc-card oc-stat-card">
-        <span className="oc-stat-label">Evidence items</span>
-        <div className="oc-stat-value">{entities.length}</div>
-        <div className="oc-stat-trend">Ready for source capture</div>
+        <span className="oc-stat-label">Enrichment runs</span>
+        <div className="oc-stat-value">{enrichmentRuns.length}</div>
+        <div className="oc-stat-trend">Stored passive checks</div>
       </article>
       <article className="oc-card oc-stat-card">
         <span className="oc-stat-label">Recent alerts</span>
@@ -415,9 +476,11 @@ function OperationsOverview({
 }
 
 function InvestigationScreens({
+  enrichmentRuns,
   entities,
   selectedCase,
 }: {
+  enrichmentRuns: EnrichmentRunRecord[];
   entities: EntityRecord[];
   selectedCase: CaseSummary | null;
 }) {
@@ -561,8 +624,8 @@ function InvestigationScreens({
                 Findings
               </div>
               <div className="oc-report-metric">
-                <span className="oc-report-metric-value">{entities.length}</span>
-                Evidence
+                <span className="oc-report-metric-value">{enrichmentRuns.length}</span>
+                Enrichments
               </div>
               <div className="oc-report-metric">
                 <span className="oc-report-metric-value">M</span>

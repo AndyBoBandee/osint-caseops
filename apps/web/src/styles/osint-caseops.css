@@ -474,6 +474,12 @@ a:hover {
   border-color: var(--border-strong);
 }
 
+.oc-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+  transform: none;
+}
+
 .oc-btn:focus-visible {
   outline: 3px solid rgba(34, 211, 238, 0.35);
   outline-offset: 2px;

@@ -56,6 +56,8 @@ Verification:
 
 ## Milestone 3: Passive Enrichment
 
+Status: Complete.
+
 Deliverables:
 
 - DNS lookup.
@@ -72,6 +74,15 @@ Acceptance:
 - User can run enrichment for a domain or URL.
 - Results are stored as enrichment runs.
 - Failed modules report clear errors without breaking the case.
+
+Verification:
+
+- The API exposes SQLite-backed enrichment run endpoints for case and entity run history.
+- Domain and URL enrichment derives a passive target and records DNS, RDAP, HTTP status, redirect chain, TLS certificate, security header, page title, robots.txt, and sitemap module results.
+- Individual module failures are stored with clear error messages while the enrichment run remains available for review.
+- The web app renders enrichment controls, per-entity latest run status, and module-level result summaries.
+- `tests/api/test_enrichment.py` verifies stored run results, failed-module error reporting, URL target derivation, unsupported entity rejection, and restart persistence against an isolated temporary data directory.
+- `scripts/smoke.sh` verifies the Docker stack can create a scoped case through the web proxy, add domain and URL entities, run passive enrichment for the domain entity, restart the API container, and read persisted entities.
 
 ## Milestone 4: Public News Trend Monitoring
 

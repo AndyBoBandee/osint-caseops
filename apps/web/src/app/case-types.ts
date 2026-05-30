@@ -33,6 +33,31 @@ export type EntityRecord = {
   updated_at: string;
 };
 
+export type EnrichmentModuleStatus = "success" | "failed" | "skipped";
+export type EnrichmentRunStatus = "success" | "partial" | "failed";
+
+export type EnrichmentModuleResult = {
+  module_name: string;
+  status: EnrichmentModuleStatus;
+  started_at: string;
+  completed_at: string;
+  result: Record<string, unknown>;
+  error_message: string;
+};
+
+export type EnrichmentRunRecord = {
+  id: string;
+  case_id: string;
+  entity_id: string;
+  module_name: string;
+  status: EnrichmentRunStatus;
+  started_at: string;
+  completed_at: string;
+  results: EnrichmentModuleResult[];
+  error_message: string;
+  created_at: string;
+};
+
 export type CaseFormState = {
   title: string;
   objective: string;

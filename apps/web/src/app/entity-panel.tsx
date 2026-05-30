@@ -3,6 +3,8 @@ import { FormEvent } from "react";
 import {
   Confidence,
   emptyEntity,
+  EnrichmentModuleResult,
+  EnrichmentRunRecord,
   EntityFormState,
   EntityRecord,
   EntityType,
@@ -11,6 +13,8 @@ import {
 
 type EntityPanelProps = {
   editingEntityId: string | null;
+  enrichmentLoadingId: string | null;
+  enrichmentRuns: EnrichmentRunRecord[];
   entities: EntityRecord[];
   entityDraft: EntityFormState;
   entityLoading: boolean;
@@ -19,6 +23,7 @@ type EntityPanelProps = {
   onDeleteEntity: (entity: EntityRecord) => void;
   onEditEntity: (entity: EntityRecord) => void;
   onEntityDraftChange: (draft: EntityFormState) => void;
+  onRunEnrichment: (entity: EntityRecord) => void;
   onSaveEntity: (event: FormEvent<HTMLFormElement>) => void;
 };
 
@@ -34,8 +39,84 @@ function confidenceBadgeClass(confidence: Confidence) {
   return "oc-badge oc-badge-low";
 }
 
+function runBadgeClass(status: EnrichmentRunRecord["status"]) {
+  if (status === "success") {
+    return "oc-badge oc-badge-success";
+  }
+
+  if (status === "partial") {
+    return "oc-badge oc-badge-medium";
+  }
+
+  return "oc-badge oc-badge-danger";
+}
+
+function moduleBadgeClass(status: EnrichmentModuleResult["status"]) {
+  if (status === "success") {
+    return "oc-badge oc-badge-success";
+  }
+
+  if (status === "skipped") {
+    return "oc-badge oc-badge-muted";
+  }
+
+  return "oc-badge oc-badge-danger";
+}
+
+function formatModuleName(moduleName: string) {
+  return moduleName.replaceAll("_", " ");
+}
+
+function resultValueToText(value: unknown): string {
+  if (Array.isArray(value)) {
+    return value.map((item) => resultValueToText(item)).join(", ");
+  }
+
+  if (value && typeof value === "object") {
+    return JSON.stringify(value);
+  }
+
+  return String(value ?? "");
+}
+
+function summarizeModuleResult(moduleResult: EnrichmentModuleResult) {
+  if (moduleResult.status === "failed") {
+    return moduleResult.error_message || "Module failed.";
+  }
+
+  const result = moduleResult.result;
+  if (moduleResult.module_name === "dns_lookup" && Array.isArray(result.addresses)) {
+    return `${result.addresses.length} address${result.addresses.length === 1 ? "" : "es"}`;
+  }
+
+  if (moduleResult.module_name === "http_status" && "status_code" in result) {
+    return `HTTP ${resultValueToText(result.status_code)}`;
+  }
+
+  if (moduleResult.module_name === "redirect_chain" && "redirect_count" in result) {
+    return `${resultValueToText(result.redirect_count)} redirect(s)`;
+  }
+
+  if (moduleResult.module_name === "page_title" && result.title) {
+    return resultValueToText(result.title);
+  }
+
+  if (moduleResult.module_name === "security_headers" && Array.isArray(result.missing)) {
+    return `${result.missing.length} missing header${result.missing.length === 1 ? "" : "s"}`;
+  }
+
+  if ("available" in result) {
+    return result.available ? "Available" : "Not found";
+  }
+
+  const firstEntry = Object.entries(result)[0];
+  return firstEntry ? resultValueToText(firstEntry[1]) : "No details returned.";
+}
+
 export function EntityPanel({
   editingEntityId,
+  enrichmentLoadingId,
+  enrichmentRuns,
   entities,
   entityDraft,
   entityLoading,
@@ -44,10 +125,20 @@ export function EntityPanel({
   onDeleteEntity,
   onEditEntity,
   onEntityDraftChange,
+  onRunEnrichment,
   onSaveEntity,
 }: EntityPanelProps) {
   const focusedEntity =
     entities.find((entity) => entity.id === editingEntityId) ?? entities[0] ?? null;
+  const latestRunByEntity = new Map<string, EnrichmentRunRecord>();
+
+  for (const run of enrichmentRuns) {
+    if (!latestRunByEntity.has(run.entity_id)) {
+      latestRunByEntity.set(run.entity_id, run);
+    }
+  }
+
+  const focusedRun = focusedEntity ? latestRunByEntity.get(focusedEntity.id) ?? null : null;
 
   return (
     <section className="oc-card" id="entity-profile" aria-label="Entities">
@@ -72,8 +163,13 @@ export function EntityPanel({
                     </span>
                   </div>
                 </div>
-                <button className="oc-btn oc-btn-ghost" type="button">
-                  Follow
+                <button
+                  className="oc-btn oc-btn-primary"
+                  disabled={enrichmentLoadingId === focusedEntity.id}
+                  onClick={() => onRunEnrichment(focusedEntity)}
+                  type="button"
+                >
+                  {enrichmentLoadingId === focusedEntity.id ? "Running" : "Run enrichment"}
                 </button>
               </div>
               <div className="oc-profile-grid">
@@ -98,11 +194,36 @@ export function EntityPanel({
                   </div>
                 </div>
                 <div className="oc-panel">
-                  <p className="oc-callout-title">Enrichment summary</p>
-                  <p className="oc-callout-body">
-                    Passive review only. Add confidence and supporting notes before drawing a
-                    conclusion.
-                  </p>
+                  <div className="oc-card-header oc-card-header-compact">
+                    <div>
+                      <p className="oc-callout-title">Latest enrichment</p>
+                      <p className="oc-callout-body">
+                        {focusedRun
+                          ? `Completed ${focusedRun.completed_at}`
+                          : "No enrichment run stored yet."}
+                      </p>
+                    </div>
+                    {focusedRun ? (
+                      <span className={runBadgeClass(focusedRun.status)}>
+                        {focusedRun.status}
+                      </span>
+                    ) : null}
+                  </div>
+                  {focusedRun ? (
+                    <div className="oc-module-list">
+                      {focusedRun.results.map((moduleResult) => (
+                        <div className="oc-module-row" key={moduleResult.module_name}>
+                          <div>
+                            <strong>{formatModuleName(moduleResult.module_name)}</strong>
+                            <p>{summarizeModuleResult(moduleResult)}</p>
+                          </div>
+                          <span className={moduleBadgeClass(moduleResult.status)}>
+                            {moduleResult.status}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -226,8 +347,19 @@ export function EntityPanel({
                     <span className={confidenceBadgeClass(entity.confidence)}>
                       {entity.confidence} confidence
                     </span>
+                    {latestRunByEntity.get(entity.id) ? (
+                      <span className={runBadgeClass(latestRunByEntity.get(entity.id)!.status)}>
+                        {latestRunByEntity.get(entity.id)!.status} enrichment
+                      </span>
+                    ) : null}
                   </div>
                   <code className="oc-mono oc-technical">{entity.value}</code>
+                  {latestRunByEntity.get(entity.id) ? (
+                    <p>
+                      Latest enrichment: {latestRunByEntity.get(entity.id)!.results.length} passive
+                      modules at {latestRunByEntity.get(entity.id)!.completed_at}
+                    </p>
+                  ) : null}
                   {entity.notes ? <p>{entity.notes}</p> : null}
                   {entity.tags.length > 0 ? (
                     <div className="oc-tag-row">
@@ -240,6 +372,14 @@ export function EntityPanel({
                   ) : null}
                 </div>
                 <div className="oc-row-actions">
+                  <button
+                    className="oc-btn oc-btn-primary oc-btn-sm"
+                    disabled={enrichmentLoadingId === entity.id}
+                    onClick={() => onRunEnrichment(entity)}
+                    type="button"
+                  >
+                    {enrichmentLoadingId === entity.id ? "Running" : "Enrich"}
+                  </button>
                   <button
                     className="oc-btn oc-btn-sm"
                     onClick={() => onEditEntity(entity)}

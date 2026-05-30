@@ -56,6 +56,26 @@ def initialize_database() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_entities_case_id ON entities(case_id);
             CREATE INDEX IF NOT EXISTS idx_entities_value ON entities(value);
+
+            CREATE TABLE IF NOT EXISTS enrichment_runs (
+                id TEXT PRIMARY KEY,
+                case_id TEXT NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+                entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+                module_name TEXT NOT NULL,
+                status TEXT NOT NULL CHECK (status IN ('success', 'partial', 'failed')),
+                started_at TEXT NOT NULL,
+                completed_at TEXT NOT NULL,
+                result_json TEXT NOT NULL DEFAULT '{}',
+                error_message TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_enrichment_runs_case_id
+                ON enrichment_runs(case_id);
+            CREATE INDEX IF NOT EXISTS idx_enrichment_runs_entity_id
+                ON enrichment_runs(entity_id);
+            CREATE INDEX IF NOT EXISTS idx_enrichment_runs_created_at
+                ON enrichment_runs(created_at);
             """
         )
 

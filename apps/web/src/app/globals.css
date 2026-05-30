@@ -186,6 +186,40 @@
   margin-bottom: var(--space-2);
 }
 
+.oc-card-header-compact {
+  margin-bottom: var(--space-3);
+}
+
+.oc-module-list {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.oc-module-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  align-items: start;
+  padding: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: rgba(5, 9, 20, 0.32);
+}
+
+.oc-module-row strong {
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  text-transform: capitalize;
+}
+
+.oc-module-row p {
+  margin: var(--space-1) 0 0;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
 .oc-profile-grid {
   display: grid;
   grid-template-columns: 1fr;

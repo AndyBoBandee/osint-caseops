@@ -13,6 +13,8 @@ CASE_FILE="$(mktemp)"
 DOMAIN_ENTITY_FILE="$(mktemp)"
 URL_ENTITY_FILE="$(mktemp)"
 ENTITIES_FILE="$(mktemp)"
+ENRICHMENT_FILE="$(mktemp)"
+ENRICHMENT_RUNS_FILE="$(mktemp)"
 CLEANED_UP=0
 READY=0
 
@@ -30,7 +32,9 @@ cleanup() {
     "${CASE_FILE}" \
     "${DOMAIN_ENTITY_FILE}" \
     "${URL_ENTITY_FILE}" \
-    "${ENTITIES_FILE}"
+    "${ENTITIES_FILE}" \
+    "${ENRICHMENT_FILE}" \
+    "${ENRICHMENT_RUNS_FILE}"
   cd "${COMPOSE_DIR}"
   docker compose down
   exit "${status}"
@@ -91,6 +95,9 @@ curl -fsS "${WEB_URL}/api/backend/cases/${CASE_ID}/entities" \
     "notes": "Smoke domain."
   }' \
   >"${DOMAIN_ENTITY_FILE}"
+DOMAIN_ENTITY_ID="$(
+  python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["id"])' "${DOMAIN_ENTITY_FILE}"
+)"
 
 curl -fsS "${WEB_URL}/api/backend/cases/${CASE_ID}/entities" \
   -H "content-type: application/json" \
@@ -104,6 +111,22 @@ curl -fsS "${WEB_URL}/api/backend/cases/${CASE_ID}/entities" \
 
 grep -q '"value":"example.com"' "${DOMAIN_ENTITY_FILE}"
 grep -q '"value":"https://example.com/login?next=home"' "${URL_ENTITY_FILE}"
+
+curl -fsS "${WEB_URL}/api/backend/entities/${DOMAIN_ENTITY_ID}/enrichment-runs" \
+  -H "content-type: application/json" \
+  --data-binary '{}' \
+  >"${ENRICHMENT_FILE}"
+
+grep -q '"module_name":"passive_enrichment"' "${ENRICHMENT_FILE}"
+grep -q '"module_name":"dns_lookup"' "${ENRICHMENT_FILE}"
+grep -q '"module_name":"rdap_lookup"' "${ENRICHMENT_FILE}"
+grep -q '"module_name":"http_status"' "${ENRICHMENT_FILE}"
+grep -q '"module_name":"redirect_chain"' "${ENRICHMENT_FILE}"
+grep -q '"module_name":"tls_certificate"' "${ENRICHMENT_FILE}"
+grep -q '"module_name":"security_headers"' "${ENRICHMENT_FILE}"
+grep -q '"module_name":"page_title"' "${ENRICHMENT_FILE}"
+grep -q '"module_name":"robots_txt"' "${ENRICHMENT_FILE}"
+grep -q '"module_name":"sitemap"' "${ENRICHMENT_FILE}"
 
 docker compose restart api >/dev/null
 
@@ -126,7 +149,12 @@ curl -fsS "${WEB_URL}/api/backend/cases/${CASE_ID}/entities" >"${ENTITIES_FILE}"
 grep -q '"value":"example.com"' "${ENTITIES_FILE}"
 grep -q '"value":"https://example.com/login?next=home"' "${ENTITIES_FILE}"
 
+curl -fsS "${WEB_URL}/api/backend/entities/${DOMAIN_ENTITY_ID}/enrichment-runs" \
+  >"${ENRICHMENT_RUNS_FILE}"
+grep -q '"module_name":"passive_enrichment"' "${ENRICHMENT_RUNS_FILE}"
+grep -q '"module_name":"dns_lookup"' "${ENRICHMENT_RUNS_FILE}"
+
 echo "API health: $(cat "${API_HEALTH_FILE}")"
 echo "DB health: $(cat "${DB_HEALTH_FILE}")"
 echo "Web health: API online"
-echo "Milestone 2 workflow: scoped case, domain entity, URL entity, restart persistence"
+echo "Milestone 3 workflow: scoped case, domain entity, URL entity, passive enrichment run, restart persistence"
