@@ -71,6 +71,19 @@ data/cases/{case_id}/
 - Do not require paid API keys for the default workflow.
 - Make external requests visible in enrichment run logs.
 
+## Public News Monitoring Providers
+
+Milestone 4 public news monitoring uses passive HTTP GET requests to public search providers. The
+default no-key provider is Hacker News Algolia (`OSINT_CASEOPS_NEWS_PROVIDER=hn_algolia`) so local
+development and smoke checks can exercise ingestion without a paid key. Optional providers are:
+
+- `OSINT_CASEOPS_NEWS_PROVIDER=brave` with `BRAVE_SEARCH_API_KEY` for Brave News Search.
+- `OSINT_CASEOPS_NEWS_PROVIDER=google_news_rss` for Google News RSS search.
+- `OSINT_CASEOPS_NEWS_PROVIDER=gdelt` for the GDELT document API.
+
+Use `OSINT_CASEOPS_NEWS_MAX_RESULTS` to cap results per keyword. Tests mock provider responses and
+do not require network access or API credentials.
+
 ## First Setup Tasks
 
 1. Keep `apps/web` and `apps/api` runnable from their own directories.

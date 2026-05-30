@@ -76,6 +76,88 @@ def initialize_database() -> None:
                 ON enrichment_runs(entity_id);
             CREATE INDEX IF NOT EXISTS idx_enrichment_runs_created_at
                 ON enrichment_runs(created_at);
+
+            CREATE TABLE IF NOT EXISTS news_keyword_sets (
+                id TEXT PRIMARY KEY,
+                case_id TEXT NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                keywords_json TEXT NOT NULL DEFAULT '[]',
+                scope_notes TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_news_keyword_sets_case_id
+                ON news_keyword_sets(case_id);
+
+            CREATE TABLE IF NOT EXISTS news_ingestion_runs (
+                id TEXT PRIMARY KEY,
+                case_id TEXT NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+                keyword_set_id TEXT REFERENCES news_keyword_sets(id) ON DELETE SET NULL,
+                provider TEXT NOT NULL,
+                status TEXT NOT NULL CHECK (status IN ('success', 'partial', 'failed')),
+                started_at TEXT NOT NULL,
+                completed_at TEXT NOT NULL,
+                query_keywords_json TEXT NOT NULL DEFAULT '[]',
+                result_count INTEGER NOT NULL DEFAULT 0,
+                error_message TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_news_ingestion_runs_case_id
+                ON news_ingestion_runs(case_id);
+            CREATE INDEX IF NOT EXISTS idx_news_ingestion_runs_created_at
+                ON news_ingestion_runs(created_at);
+
+            CREATE TABLE IF NOT EXISTS news_results (
+                id TEXT PRIMARY KEY,
+                case_id TEXT NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+                run_id TEXT NOT NULL REFERENCES news_ingestion_runs(id) ON DELETE CASCADE,
+                keyword TEXT NOT NULL,
+                source_url TEXT NOT NULL,
+                publisher TEXT NOT NULL DEFAULT '',
+                title TEXT NOT NULL DEFAULT '',
+                snippet TEXT NOT NULL DEFAULT '',
+                published_at TEXT NOT NULL DEFAULT '',
+                retrieved_at TEXT NOT NULL,
+                review_status TEXT NOT NULL CHECK (
+                    review_status IN ('pending', 'relevant', 'not_relevant')
+                ) DEFAULT 'pending',
+                saved_as_evidence INTEGER NOT NULL CHECK (saved_as_evidence IN (0, 1)) DEFAULT 0,
+                evidence_link_id TEXT,
+                theme TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                UNIQUE(case_id, source_url, keyword)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_news_results_case_id
+                ON news_results(case_id);
+            CREATE INDEX IF NOT EXISTS idx_news_results_run_id
+                ON news_results(run_id);
+            CREATE INDEX IF NOT EXISTS idx_news_results_review_status
+                ON news_results(review_status);
+            CREATE INDEX IF NOT EXISTS idx_news_results_keyword
+                ON news_results(keyword);
+
+            CREATE TABLE IF NOT EXISTS evidence_links (
+                id TEXT PRIMARY KEY,
+                case_id TEXT NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+                news_result_id TEXT NOT NULL REFERENCES news_results(id) ON DELETE CASCADE,
+                source_url TEXT NOT NULL,
+                publisher TEXT NOT NULL DEFAULT '',
+                title TEXT NOT NULL DEFAULT '',
+                snippet TEXT NOT NULL DEFAULT '',
+                published_at TEXT NOT NULL DEFAULT '',
+                retrieved_at TEXT NOT NULL,
+                query_keyword TEXT NOT NULL DEFAULT '',
+                analyst_note TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_evidence_links_news_result_id
+                ON evidence_links(news_result_id);
+            CREATE INDEX IF NOT EXISTS idx_evidence_links_case_id
+                ON evidence_links(case_id);
             """
         )
 

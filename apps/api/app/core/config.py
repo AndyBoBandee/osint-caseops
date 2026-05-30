@@ -12,6 +12,9 @@ class Settings:
         self.data_dir = Path(data_dir).expanduser().resolve() if data_dir else repo_root / "data"
         self.database_path = self.data_dir / "osint_caseops.sqlite3"
         self.service_name = "osint-caseops-api"
+        self.news_search_provider = getenv("OSINT_CASEOPS_NEWS_PROVIDER", "hn_algolia")
+        self.brave_search_api_key = getenv("BRAVE_SEARCH_API_KEY", "")
+        self.news_search_max_results = int(getenv("OSINT_CASEOPS_NEWS_MAX_RESULTS", "10"))
 
 
 @lru_cache

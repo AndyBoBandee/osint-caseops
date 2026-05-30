@@ -26,6 +26,14 @@ MVP modules are passive by default. They should not:
 - Collect credentials.
 - Use stolen or leaked private data.
 
+Public news monitoring must:
+
+- Restrict scans to scoped scam, fraud, crime, impersonation, or adjacent public-interest terms.
+- Store provider results for analyst review instead of asserting that a result proves wrongdoing.
+- Show source attribution and confidence-aware trend language.
+- Save only public source links as milestone 4 evidence, with full artifact capture deferred to the
+  evidence milestone.
+
 ## Sensitive Entity Controls
 
 The MVP should avoid private-person investigation workflows.

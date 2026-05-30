@@ -58,6 +58,83 @@ export type EnrichmentRunRecord = {
   created_at: string;
 };
 
+export type NewsReviewStatus = "pending" | "relevant" | "not_relevant";
+export type NewsRunStatus = "success" | "partial" | "failed";
+export type TrendGroupType = "keyword" | "source" | "time_window" | "theme";
+
+export type NewsKeywordSet = {
+  id: string;
+  case_id: string;
+  name: string;
+  keywords: string[];
+  scope_notes: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type NewsResultRecord = {
+  id: string;
+  case_id: string;
+  run_id: string;
+  keyword: string;
+  source_url: string;
+  publisher: string;
+  title: string;
+  snippet: string;
+  published_at: string;
+  retrieved_at: string;
+  review_status: NewsReviewStatus;
+  saved_as_evidence: boolean;
+  evidence_link_id: string | null;
+  theme: string;
+  created_at: string;
+};
+
+export type NewsIngestionRunRecord = {
+  id: string;
+  case_id: string;
+  keyword_set_id: string | null;
+  provider: string;
+  status: NewsRunStatus;
+  started_at: string;
+  completed_at: string;
+  query_keywords: string[];
+  result_count: number;
+  error_message: string;
+  created_at: string;
+  results: NewsResultRecord[];
+};
+
+export type EvidenceLinkRecord = {
+  id: string;
+  case_id: string;
+  news_result_id: string;
+  source_url: string;
+  publisher: string;
+  title: string;
+  snippet: string;
+  published_at: string;
+  retrieved_at: string;
+  query_keyword: string;
+  analyst_note: string;
+  created_at: string;
+};
+
+export type TrendGroup = {
+  group_type: TrendGroupType;
+  label: string;
+  result_count: number;
+  sample_titles: string[];
+  source_attribution: string[];
+  confidence_language: string;
+};
+
+export type TrendSummary = {
+  case_id: string;
+  generated_at: string;
+  groups: TrendGroup[];
+};
+
 export type CaseFormState = {
   title: string;
   objective: string;
@@ -80,6 +157,12 @@ export type EntityFormState = {
   notes: string;
 };
 
+export type KeywordSetFormState = {
+  name: string;
+  keywords: string;
+  scopeNotes: string;
+};
+
 export const emptyCreateCase: CaseFormState = {
   title: "",
   objective: "",
@@ -90,6 +173,12 @@ export const emptyCreateCase: CaseFormState = {
   tags: "",
   analystNotes: "",
   scopeAcknowledged: false,
+};
+
+export const emptyKeywordSet: KeywordSetFormState = {
+  name: "Scam and fraud monitoring",
+  keywords: "scam alert, fraud warning, impersonation scam",
+  scopeNotes: "Scoped public news and search monitoring only.",
 };
 
 export const emptyEntity: EntityFormState = {
@@ -113,6 +202,15 @@ export function tagsFromInput(value: string): string[] {
 
 export function tagsToInput(tags: string[]): string {
   return tags.join(", ");
+}
+
+export function keywordsFromInput(value: string): string[] {
+  const keywords = value
+    .split(",")
+    .map((keyword) => keyword.trim().toLowerCase())
+    .filter(Boolean);
+
+  return Array.from(new Set(keywords));
 }
 
 export function draftFromCase(caseRecord: CaseSummary): CaseFormState {

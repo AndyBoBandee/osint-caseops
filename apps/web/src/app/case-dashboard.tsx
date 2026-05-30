@@ -12,12 +12,22 @@ import {
   draftFromEntity,
   emptyCreateCase,
   emptyEntity,
+  emptyKeywordSet,
   EnrichmentRunRecord,
   EntityFormState,
   EntityRecord,
+  EvidenceLinkRecord,
+  keywordsFromInput,
+  KeywordSetFormState,
+  NewsIngestionRunRecord,
+  NewsKeywordSet,
+  NewsResultRecord,
+  NewsReviewStatus,
   tagsFromInput,
+  TrendSummary,
 } from "./case-types";
 import { EntityPanel } from "./entity-panel";
+import { NewsMonitoringPanel } from "./news-monitoring-panel";
 
 type CaseDashboardProps = {
   initialCases: CaseSummary[];
@@ -47,10 +57,18 @@ export function CaseDashboard({ initialCases, initialApiOnline }: CaseDashboardP
   );
   const [entities, setEntities] = useState<EntityRecord[]>([]);
   const [enrichmentRuns, setEnrichmentRuns] = useState<EnrichmentRunRecord[]>([]);
+  const [keywordSets, setKeywordSets] = useState<NewsKeywordSet[]>([]);
+  const [newsRuns, setNewsRuns] = useState<NewsIngestionRunRecord[]>([]);
+  const [newsResults, setNewsResults] = useState<NewsResultRecord[]>([]);
+  const [evidenceLinks, setEvidenceLinks] = useState<EvidenceLinkRecord[]>([]);
+  const [trendSummary, setTrendSummary] = useState<TrendSummary | null>(null);
   const [entityDraft, setEntityDraft] = useState<EntityFormState>(emptyEntity);
+  const [keywordDraft, setKeywordDraft] = useState<KeywordSetFormState>(emptyKeywordSet);
   const [editingEntityId, setEditingEntityId] = useState<string | null>(null);
   const [entityLoading, setEntityLoading] = useState(false);
+  const [newsLoading, setNewsLoading] = useState(false);
   const [enrichmentLoadingId, setEnrichmentLoadingId] = useState<string | null>(null);
+  const [scanLoadingId, setScanLoadingId] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState(initialApiOnline ? "" : "Start the API to manage cases.");
 
@@ -66,28 +84,53 @@ export function CaseDashboard({ initialCases, initialApiOnline }: CaseDashboardP
       if (!selectedCaseId) {
         setEntities([]);
         setEnrichmentRuns([]);
+        setKeywordSets([]);
+        setNewsRuns([]);
+        setNewsResults([]);
+        setEvidenceLinks([]);
+        setTrendSummary(null);
         return;
       }
 
       setEntityLoading(true);
+      setNewsLoading(true);
       setError("");
 
       try {
-        const [nextEntities, nextEnrichmentRuns] = await Promise.all([
+        const [
+          nextEntities,
+          nextEnrichmentRuns,
+          nextKeywordSets,
+          nextNewsRuns,
+          nextNewsResults,
+          nextEvidenceLinks,
+          nextTrendSummary,
+        ] = await Promise.all([
           apiRequest<EntityRecord[]>(`/cases/${selectedCaseId}/entities`),
           apiRequest<EnrichmentRunRecord[]>(`/cases/${selectedCaseId}/enrichment-runs`),
+          apiRequest<NewsKeywordSet[]>(`/cases/${selectedCaseId}/news-keyword-sets`),
+          apiRequest<NewsIngestionRunRecord[]>(`/cases/${selectedCaseId}/news-ingestion-runs`),
+          apiRequest<NewsResultRecord[]>(`/cases/${selectedCaseId}/news-results`),
+          apiRequest<EvidenceLinkRecord[]>(`/cases/${selectedCaseId}/evidence-links`),
+          apiRequest<TrendSummary>(`/cases/${selectedCaseId}/news-trends`),
         ]);
         if (!ignore) {
           setEntities(nextEntities);
           setEnrichmentRuns(nextEnrichmentRuns);
+          setKeywordSets(nextKeywordSets);
+          setNewsRuns(nextNewsRuns);
+          setNewsResults(nextNewsResults);
+          setEvidenceLinks(nextEvidenceLinks);
+          setTrendSummary(nextTrendSummary);
         }
       } catch (caught) {
         if (!ignore) {
-          setError(caught instanceof Error ? caught.message : "Could not load entities.");
+          setError(caught instanceof Error ? caught.message : "Could not load case workspace.");
         }
       } finally {
         if (!ignore) {
           setEntityLoading(false);
+          setNewsLoading(false);
         }
       }
     }
@@ -182,6 +225,11 @@ export function CaseDashboard({ initialCases, initialApiOnline }: CaseDashboardP
       setCaseDraft(nextSelected ? draftFromCase(nextSelected) : null);
       setEntities([]);
       setEnrichmentRuns([]);
+      setKeywordSets([]);
+      setNewsRuns([]);
+      setNewsResults([]);
+      setEvidenceLinks([]);
+      setTrendSummary(null);
       setNotice("Case deleted.");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not delete case.");
@@ -316,6 +364,150 @@ export function CaseDashboard({ initialCases, initialApiOnline }: CaseDashboardP
     }
   }
 
+  async function refreshNewsWorkspace(caseId: string) {
+    const [nextKeywordSets, nextNewsRuns, nextNewsResults, nextEvidenceLinks, nextTrendSummary] =
+      await Promise.all([
+        apiRequest<NewsKeywordSet[]>(`/cases/${caseId}/news-keyword-sets`),
+        apiRequest<NewsIngestionRunRecord[]>(`/cases/${caseId}/news-ingestion-runs`),
+        apiRequest<NewsResultRecord[]>(`/cases/${caseId}/news-results`),
+        apiRequest<EvidenceLinkRecord[]>(`/cases/${caseId}/evidence-links`),
+        apiRequest<TrendSummary>(`/cases/${caseId}/news-trends`),
+      ]);
+
+    setKeywordSets(nextKeywordSets);
+    setNewsRuns(nextNewsRuns);
+    setNewsResults(nextNewsResults);
+    setEvidenceLinks(nextEvidenceLinks);
+    setTrendSummary(nextTrendSummary);
+  }
+
+  async function handleCreateKeywordSet(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedCase) {
+      return;
+    }
+
+    setError("");
+    setNotice("");
+
+    try {
+      const created = await apiRequest<NewsKeywordSet>(
+        `/cases/${selectedCase.id}/news-keyword-sets`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            name: keywordDraft.name,
+            keywords: keywordsFromInput(keywordDraft.keywords),
+            scope_notes: keywordDraft.scopeNotes,
+          }),
+        },
+      );
+      setKeywordSets((currentSets) => [created, ...currentSets]);
+      setKeywordDraft(emptyKeywordSet);
+      setNotice("Keyword set saved.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not save keyword set.");
+    }
+  }
+
+  async function handleRunKeywordSet(keywordSet: NewsKeywordSet) {
+    if (!selectedCase) {
+      return;
+    }
+
+    setError("");
+    setNotice("");
+    setScanLoadingId(keywordSet.id);
+
+    try {
+      const run = await apiRequest<NewsIngestionRunRecord>(
+        `/cases/${selectedCase.id}/news-ingestion-runs`,
+        {
+          method: "POST",
+          body: JSON.stringify({ keyword_set_id: keywordSet.id }),
+        },
+      );
+      await refreshNewsWorkspace(selectedCase.id);
+      setCases((currentCases) =>
+        currentCases.map((caseRecord) =>
+          caseRecord.id === selectedCase.id
+            ? {
+                ...caseRecord,
+                updated_at: run.created_at,
+              }
+            : caseRecord,
+        ),
+      );
+      setNotice(
+        run.status === "success"
+          ? `Public scan stored ${run.result_count} result(s).`
+          : `Public scan completed with ${run.status} status.`,
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not run public news scan.");
+    } finally {
+      setScanLoadingId(null);
+    }
+  }
+
+  async function handleUpdateNewsReviewStatus(
+    result: NewsResultRecord,
+    reviewStatus: NewsReviewStatus,
+  ) {
+    setError("");
+    setNotice("");
+
+    try {
+      const updated = await apiRequest<NewsResultRecord>(`/news-results/${result.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ review_status: reviewStatus }),
+      });
+      setNewsResults((currentResults) =>
+        currentResults.map((currentResult) =>
+          currentResult.id === updated.id ? updated : currentResult,
+        ),
+      );
+      setNotice("Review status updated.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not update review status.");
+    }
+  }
+
+  async function handleSaveEvidence(result: NewsResultRecord) {
+    setError("");
+    setNotice("");
+
+    try {
+      const evidence = await apiRequest<EvidenceLinkRecord>(
+        `/news-results/${result.id}/evidence-links`,
+        {
+          method: "POST",
+          body: JSON.stringify({ analyst_note: "Saved from public news review queue." }),
+        },
+      );
+      setEvidenceLinks((currentLinks) =>
+        currentLinks.some((currentLink) => currentLink.id === evidence.id)
+          ? currentLinks
+          : [evidence, ...currentLinks],
+      );
+      setNewsResults((currentResults) =>
+        currentResults.map((currentResult) =>
+          currentResult.id === result.id
+            ? {
+                ...currentResult,
+                review_status: "relevant",
+                saved_as_evidence: true,
+                evidence_link_id: evidence.id,
+              }
+            : currentResult,
+        ),
+      );
+      setNotice("Evidence link saved.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not save evidence link.");
+    }
+  }
+
   function selectCase(caseRecord: CaseSummary) {
     setSelectedCaseId(caseRecord.id);
     setCaseDraft(draftFromCase(caseRecord));
@@ -372,6 +564,25 @@ export function CaseDashboard({ initialCases, initialApiOnline }: CaseDashboardP
           onSaveEntity={handleSaveEntity}
         />
       </div>
+
+      <NewsMonitoringPanel
+        evidenceLinks={evidenceLinks}
+        keywordDraft={keywordDraft}
+        keywordSets={keywordSets}
+        newsLoading={newsLoading}
+        newsResults={newsResults}
+        newsRuns={newsRuns}
+        scanLoadingId={scanLoadingId}
+        selectedCase={selectedCase}
+        trendSummary={trendSummary}
+        onCreateKeywordSet={handleCreateKeywordSet}
+        onKeywordDraftChange={setKeywordDraft}
+        onRunKeywordSet={(keywordSet) => void handleRunKeywordSet(keywordSet)}
+        onSaveEvidence={(result) => void handleSaveEvidence(result)}
+        onUpdateReviewStatus={(result, reviewStatus) =>
+          void handleUpdateNewsReviewStatus(result, reviewStatus)
+        }
+      />
 
       <InvestigationScreens
         enrichmentRuns={enrichmentRuns}

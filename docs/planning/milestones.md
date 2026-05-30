@@ -86,6 +86,8 @@ Verification:
 
 ## Milestone 4: Public News Trend Monitoring
 
+Status: Complete.
+
 Deliverables:
 
 - Keyword set management for scoped public news monitoring.
@@ -101,6 +103,21 @@ Acceptance:
 - Returned public news/search results are stored for analyst review without making unsupported conclusions.
 - User can save relevant results as evidence.
 - User can view a basic trend summary with source attribution and confidence-aware language.
+
+Verification:
+
+- The API exposes SQLite-backed keyword set, public search ingestion run, news result review,
+  evidence link, and trend summary endpoints.
+- Keyword scans require scam, fraud, crime, impersonation, or adjacent public-interest terms before
+  provider requests are made.
+- Public search results store source URL, publisher, title, snippet, published date when available,
+  retrieval timestamp, and query keyword for analyst review.
+- Trend summaries group stored results by keyword, source, time window, and repeated theme with
+  confidence-aware wording that requires analyst review.
+- Relevant public results can be marked as evidence links without making unsupported conclusions.
+- `tests/api/test_news_monitoring.py` verifies keyword set validation, mocked provider ingestion,
+  review queue updates, evidence saves, trend grouping, provider failure handling, and restart
+  persistence against an isolated temporary data directory.
 
 ## Milestone 5: Evidence Capture
 

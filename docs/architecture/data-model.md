@@ -133,6 +133,80 @@ Fields:
 - result_json.
 - error_message.
 
+## News Keyword Set
+
+Represents scoped terms for public news or search monitoring.
+
+Fields:
+
+- id.
+- case_id.
+- name.
+- keywords.
+- scope_notes.
+- created_at.
+- updated_at.
+
+## News Ingestion Run
+
+Represents one public news or search provider request batch for a case.
+
+Fields:
+
+- id.
+- case_id.
+- keyword_set_id.
+- provider.
+- status.
+- started_at.
+- completed_at.
+- query_keywords.
+- result_count.
+- error_message.
+- created_at.
+
+## News Result
+
+Represents one stored public news or search result awaiting analyst review.
+
+Fields:
+
+- id.
+- case_id.
+- run_id.
+- keyword.
+- source_url.
+- publisher.
+- title.
+- snippet.
+- published_at.
+- retrieved_at.
+- review_status.
+- saved_as_evidence.
+- evidence_link_id.
+- theme.
+- created_at.
+
+## Evidence Link
+
+Represents a milestone 4 source-link evidence record saved from the news review queue. Full evidence
+artifacts arrive in the evidence capture milestone.
+
+Fields:
+
+- id.
+- case_id.
+- news_result_id.
+- source_url.
+- publisher.
+- title.
+- snippet.
+- published_at.
+- retrieved_at.
+- query_keyword.
+- analyst_note.
+- created_at.
+
 ## Timeline Event
 
 Represents important case activity.
