@@ -2,7 +2,7 @@
 
 ## Default Stack
 
-- Frontend: Next.js, React, Tailwind CSS, shadcn/ui.
+- Frontend: Next.js and React. Tailwind CSS and shadcn/ui are candidates when the UI system needs them, but they are not part of the current foundation scaffold.
 - Backend: Python FastAPI.
 - Database: SQLite.
 - Evidence storage: local filesystem.

@@ -1,20 +1,29 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
 from app.core.config import get_settings
-from app.db.sqlite import check_database
+from app.db.sqlite import check_database, initialize_database
 
 
-settings = get_settings()
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    initialize_database()
+    yield
 
 app = FastAPI(
     title="OSINT CaseOps API",
     version="0.1.0",
     summary="Local-first API foundation for OSINT CaseOps.",
+    lifespan=lifespan,
 )
 
 
 @app.get("/health")
 def health() -> dict[str, str]:
+    settings = get_settings()
+
     return {
         "status": "ok",
         "service": settings.service_name,

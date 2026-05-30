@@ -4,8 +4,8 @@
 
 This repository is a local-first OSINT workbench monorepo. Brand, voice, vocabulary, and safety rules live in `docs/project/brand-book.md`.
 
-- `apps/web/`: planned Next.js frontend. UI source should live under `apps/web/src/`.
-- `apps/api/`: planned FastAPI backend. API code should live under `apps/api/app/`.
+- `apps/web/`: Next.js frontend. UI source lives under `apps/web/src/`.
+- `apps/api/`: FastAPI backend. API code lives under `apps/api/app/`.
 - `docs/`: project, product, architecture, security, operations, and planning docs.
 - `data/`: local runtime data for cases, exports, and temporary files. Do not commit real investigation data.
 - `infra/docker/`: Docker Compose and container configuration.

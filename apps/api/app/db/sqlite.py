@@ -4,7 +4,7 @@ import sqlite3
 from app.core.config import get_settings
 
 
-def check_database() -> dict[str, str]:
+def initialize_database() -> None:
     settings = get_settings()
     settings.data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -17,6 +17,13 @@ def check_database() -> dict[str, str]:
             )
             """
         )
+
+
+def check_database() -> dict[str, str]:
+    settings = get_settings()
+    initialize_database()
+
+    with sqlite3.connect(settings.database_path) as connection:
         checked_at = datetime.now(UTC).isoformat()
         connection.execute(
             """

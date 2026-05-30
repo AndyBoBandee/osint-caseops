@@ -2,6 +2,8 @@
 
 ## Milestone 1: Repository Foundation
 
+Status: Complete.
+
 Deliverables:
 
 - Project folder structure.
@@ -17,6 +19,13 @@ Acceptance:
 - Developer can start the local stack.
 - Web app can call API health endpoint.
 - API can read and write to SQLite.
+
+Verification:
+
+- `infra/docker/docker-compose.yml` starts the `api` and `web` services.
+- The web app reads `API_BASE_URL` and renders the API `/health` result in the foundation status panel.
+- The API initializes the local SQLite database on startup and `/health/db` writes and reads the `app_health` row.
+- `tests/api/test_health.py` verifies API health and SQLite read/write behavior against an isolated temporary data directory.
 
 ## Milestone 2: Case And Entity System
 

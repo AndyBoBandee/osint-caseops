@@ -80,4 +80,3 @@ Contributions are welcome around case workflows, evidence handling, enrichment m
 ## Roadmap
 
 See `docs/project/roadmap.md` and `docs/planning/milestones.md`.
-# osint-caseops

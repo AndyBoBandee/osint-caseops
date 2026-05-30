@@ -5,20 +5,29 @@ services:
     command: uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
     environment:
       OSINT_CASEOPS_DATA_DIR: /workspace/data
+      UV_LINK_MODE: copy
+      UV_PROJECT_ENVIRONMENT: /workspace/apps/api/.venv-docker
     ports:
       - "8000:8000"
     volumes:
       - ../..:/workspace
+      - api_venv:/workspace/apps/api/.venv-docker
 
   web:
     image: node:26-bookworm-slim
     working_dir: /workspace/apps/web
-    command: sh -c "npm install && npm run dev -- --hostname 0.0.0.0"
+    command: sh -c "npm ci && npm run build && npm run start -- --hostname 0.0.0.0"
     environment:
       API_BASE_URL: http://api:8000
+      NEXT_TELEMETRY_DISABLED: "1"
     ports:
       - "3000:3000"
     volumes:
       - ../..:/workspace
+      - web_node_modules:/workspace/apps/web/node_modules
     depends_on:
       - api
+
+volumes:
+  api_venv:
+  web_node_modules:

@@ -5,15 +5,17 @@
 - Node.js for the web app.
 - Python for the API.
 - SQLite for local data.
-- Playwright for screenshots.
+- Playwright for screenshots and browser smoke tests in later milestones.
 - Docker Compose for local orchestration.
 
-## Planned Services
+## Services
 
 - `web`: Next.js frontend.
 - `api`: FastAPI backend.
-- `worker`: lightweight background job process, added later.
+- `worker`: lightweight background job process, added in a later milestone.
 - SQLite runs as a local database file mounted into the app data directory, not as a separate service.
+
+Docker Compose builds and starts the web service with `next start` so full-stack smoke checks do not rewrite development-only generated files. Use `cd apps/web && npm run dev` when you need frontend hot reload.
 
 ## Local Data Paths
 
