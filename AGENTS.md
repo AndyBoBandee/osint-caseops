@@ -10,22 +10,23 @@ This repository is a local-first OSINT workbench monorepo. Brand, voice, vocabul
 - `data/`: local runtime data for cases, exports, and temporary files. Do not commit real investigation data.
 - `infra/docker/`: Docker Compose and container configuration.
 - `packages/shared-schemas/`: shared API/schema contracts when needed.
+- `scripts/`: root helper scripts used by the `Makefile`.
 - `tests/`: API, end-to-end, and fixture tests.
 
 ## Build, Test, and Development Commands
 
-Use these commands for local development:
+Use these root commands for local development:
 
 ```sh
-cd apps/api && uv run uvicorn app.main:app --reload
-cd apps/api && uv run pytest ../../tests/api
-cd apps/web && npm run dev
-cd apps/web && npm run lint
-cd apps/web && npm run build
-cd infra/docker && docker compose up --build
+make bootstrap
+make dev
+make test-fast
+make test
+make check
+make smoke
 ```
 
-The web app runs on `http://127.0.0.1:3000` by default. The API runs on `http://127.0.0.1:8000` and exposes `/health` and `/health/db`.
+Use `make api` or `make web` to run one service at a time. Use `make docker-up`, `make docker-down`, and `make docker-logs` for direct Docker Compose control. The web app runs on `http://127.0.0.1:3000` by default. The API runs on `http://127.0.0.1:8000` and exposes `/health` and `/health/db`.
 
 For Codex skill and plugin routing, see `docs/operations/codex-capabilities.md`.
 

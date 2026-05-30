@@ -31,8 +31,8 @@ Run these checks before committing repo hygiene or capability guidance changes:
 
 ```sh
 git diff --check
-rg -n '[[:blank:]]$' README.md AGENTS.md docs
-rg -n 'TO[D]O|TB[D]|FIX[M]E' README.md AGENTS.md docs apps/api apps/web infra tests
+rg -n '[[:blank:]]$' README.md AGENTS.md docs Makefile scripts
+rg -n 'TO[D]O|TB[D]|FIX[M]E' README.md AGENTS.md docs apps/api apps/web infra tests Makefile scripts
 cd apps/api && uv run pytest ../../tests/api
 cd apps/web && npm run lint
 cd apps/web && npm run build

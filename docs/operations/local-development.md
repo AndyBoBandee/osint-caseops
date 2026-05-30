@@ -15,7 +15,29 @@
 - `worker`: lightweight background job process, added in a later milestone.
 - SQLite runs as a local database file mounted into the app data directory, not as a separate service.
 
-Docker Compose builds and starts the web service with `next start` so full-stack smoke checks do not rewrite development-only generated files. Use `cd apps/web && npm run dev` when you need frontend hot reload.
+## Root Commands
+
+Use the root `Makefile` for day-to-day work:
+
+```sh
+make bootstrap
+make dev
+make test-fast
+make test
+make check
+make smoke
+```
+
+- `make bootstrap` installs API and web dependencies.
+- `make dev` runs the API with reload and the web app with Next dev.
+- `make test-fast` runs API tests and web lint.
+- `make test` adds the Next production build.
+- `make check` runs repo hygiene, tests, build, audit, and Compose config.
+- `make smoke` starts Docker Compose, verifies API health, SQLite health, and the web-to-API health panel, then shuts Compose down.
+
+Use `make api` or `make web` to run only one service. Use `make docker-up`, `make docker-down`, and `make docker-logs` for direct Compose control.
+
+Docker Compose builds and starts the web service with `next start` so full-stack smoke checks do not rewrite development-only generated files. Use `make dev` or `make web` when you need frontend hot reload.
 
 ## Local Data Paths
 

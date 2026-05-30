@@ -22,27 +22,28 @@ This project is intended for lawful, ethical, public-source research. It should 
 
 ## Quick Start
 
-Run the full local stack:
+Install dependencies:
 
 ```sh
-cd infra/docker
-docker compose up --build
+make bootstrap
 ```
 
-Run services separately:
+Run the fast local development stack:
 
 ```sh
-cd apps/api && uv run uvicorn app.main:app --reload
-cd apps/web && npm run dev
+make dev
 ```
 
 Useful checks:
 
 ```sh
-cd apps/api && uv run pytest ../../tests/api
-cd apps/web && npm run lint
-cd apps/web && npm run build
+make test-fast
+make test
+make check
+make smoke
 ```
+
+`make dev` runs the API at `http://127.0.0.1:8000` and the web app at `http://127.0.0.1:3000`. `make smoke` runs the Docker Compose stack, verifies API, SQLite, and web-to-API health, then shuts the stack down.
 
 ## Project Layout
 
@@ -51,6 +52,7 @@ cd apps/web && npm run build
 - `docs/`: product, architecture, security, brand, and planning documentation.
 - `data/`: local runtime data. Do not commit real case data or exports.
 - `infra/docker/`: Docker Compose configuration.
+- `scripts/`: root helper scripts used by `make` commands.
 - `tests/`: API and end-to-end tests.
 
 ## Example Workflows
