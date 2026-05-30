@@ -1,0 +1,164 @@
+:root {
+  color-scheme: light;
+  --background: #f7f8f4;
+  --foreground: #17201b;
+  --muted: #667269;
+  --line: #d9ded5;
+  --surface: #ffffff;
+  --accent: #216869;
+  --accent-strong: #123f42;
+  --warning: #9a5b13;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+a {
+  color: inherit;
+}
+
+.page-shell {
+  min-height: 100vh;
+  padding: 32px;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 24px;
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.hero,
+.panel {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.hero {
+  padding: 36px;
+}
+
+.hero h1 {
+  max-width: 780px;
+  margin: 0;
+  font-size: clamp(2.25rem, 5vw, 4.75rem);
+  line-height: 0.95;
+  letter-spacing: 0;
+}
+
+.hero p {
+  max-width: 700px;
+  margin: 24px 0 0;
+  color: var(--muted);
+  font-size: 1.1rem;
+  line-height: 1.65;
+}
+
+.section {
+  margin-top: 24px;
+}
+
+.section h2,
+.panel h2 {
+  margin: 0 0 16px;
+  font-size: 1rem;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.flow-list,
+.status-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.flow-list li,
+.status-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px 16px;
+  background: #fbfcf8;
+}
+
+.flow-list strong,
+.status-item strong {
+  display: block;
+  font-size: 0.95rem;
+}
+
+.flow-list span,
+.status-item span {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.panel {
+  align-self: start;
+  padding: 24px;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  border-radius: 999px;
+  padding: 6px 12px;
+  background: #e7f2ed;
+  color: var(--accent-strong);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.status-pill.warning {
+  background: #fff2d9;
+  color: var(--warning);
+}
+
+.doc-links {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.doc-links code {
+  display: block;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 10px;
+  color: var(--accent);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.84rem;
+  line-height: 1.4;
+}
+
+@media (max-width: 860px) {
+  .page-shell {
+    padding: 18px;
+  }
+
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .hero {
+    padding: 24px;
+  }
+}
