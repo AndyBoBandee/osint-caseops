@@ -27,6 +27,8 @@ cd infra/docker && docker compose up --build
 
 The web app runs on `http://127.0.0.1:3000` by default. The API runs on `http://127.0.0.1:8000` and exposes `/health` and `/health/db`.
 
+For Codex skill and plugin routing, see `docs/operations/codex-capabilities.md`.
+
 ## Coding Style & Naming Conventions
 
 Use concise, typed code and keep module boundaries clear. Python modules should use `snake_case`; React components should use `PascalCase`; shared TypeScript types should use `PascalCase`. Use two-space indentation for TypeScript/React and four-space indentation for Python. Prefer explicit names such as `enrichment_runs`, `case_reports`, and `evidence_records` over abbreviations.
@@ -41,7 +43,7 @@ Place backend tests in `tests/api/`, browser or workflow tests in `tests/e2e/`, 
 
 ## Commit & Pull Request Guidelines
 
-This scaffold has no Git history yet. Use Conventional Commit-style messages, for example `docs: add safety guardrails` or `feat(api): add case model`. Pull requests should include a short summary, linked issue if applicable, test results, screenshots for UI changes, and notes about any safety, privacy, or data-storage impact.
+This repository has active Git history on `main`. Keep commits small and use Conventional Commit-style messages, for example `docs: add safety guardrails` or `feat(api): add case model`. Pull requests should include a short summary, linked issue if applicable, test results, screenshots for UI changes, and notes about any safety, privacy, or data-storage impact.
 
 ## Security & Configuration Tips
 
