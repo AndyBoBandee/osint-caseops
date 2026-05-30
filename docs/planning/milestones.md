@@ -29,6 +29,8 @@ Verification:
 
 ## Milestone 2: Case And Entity System
 
+Status: Complete.
+
 Deliverables:
 
 - Case CRUD.
@@ -42,6 +44,15 @@ Acceptance:
 - User can create a scoped case.
 - User can add a domain or URL entity.
 - Case and entity records persist after restart.
+
+Verification:
+
+- The API exposes SQLite-backed CRUD endpoints for cases, nested case entities, and direct entity updates/deletes.
+- Case creation requires an explicit lawful public-source scope acknowledgment and records the acknowledgment timestamp.
+- Domain and URL entities are normalized and validated before persistence.
+- The web app renders a case dashboard with case create/read/update/delete controls, entity create/read/update/delete controls, tags, notes, and scope status.
+- `tests/api/test_cases.py` verifies scope acknowledgment, case CRUD, entity CRUD, domain and URL validation, duplicate protection, cascading case deletion, and restart persistence against an isolated temporary data directory.
+- `scripts/smoke.sh` verifies the Docker stack can create a scoped case through the web proxy, add domain and URL entities, restart the API container, and read the persisted entities.
 
 ## Milestone 3: Passive Enrichment
 
@@ -62,7 +73,25 @@ Acceptance:
 - Results are stored as enrichment runs.
 - Failed modules report clear errors without breaking the case.
 
-## Milestone 4: Evidence Capture
+## Milestone 4: Public News Trend Monitoring
+
+Deliverables:
+
+- Keyword set management for scoped public news monitoring.
+- Brave Search API or similar public news/search provider integration.
+- Public news/search ingestion run records.
+- Result review queue with source URL, publisher, title, snippet, published date when available, retrieval timestamp, and query keyword.
+- Basic trend grouping by keyword, source, time window, and repeated theme.
+- Save relevant public news results as evidence links.
+
+Acceptance:
+
+- User can run a scoped keyword scan for scam, fraud, crime, impersonation, or adjacent public-interest terms.
+- Returned public news/search results are stored for analyst review without making unsupported conclusions.
+- User can save relevant results as evidence.
+- User can view a basic trend summary with source attribution and confidence-aware language.
+
+## Milestone 5: Evidence Capture
 
 Deliverables:
 
@@ -78,7 +107,7 @@ Acceptance:
 - Evidence files are stored locally.
 - Evidence metadata is visible in the case.
 
-## Milestone 5: Findings
+## Milestone 6: Findings
 
 Deliverables:
 
@@ -94,7 +123,7 @@ Acceptance:
 - User can edit confidence and severity.
 - Findings show linked evidence.
 
-## Milestone 6: Reports
+## Milestone 7: Reports
 
 Deliverables:
 
@@ -110,7 +139,7 @@ Acceptance:
 - User can export a complete Markdown report.
 - Export includes scope, methodology, findings, evidence, and recommendations.
 
-## Milestone 7: Graph And Timeline
+## Milestone 8: Graph And Timeline
 
 Deliverables:
 
@@ -124,7 +153,7 @@ Acceptance:
 - User can see how case entities, evidence, and findings connect.
 - User can review case activity in chronological order.
 
-## Milestone 8: Change Monitoring
+## Milestone 9: Change Monitoring
 
 Deliverables:
 

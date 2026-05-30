@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.cases import router as cases_router
 from app.core.config import get_settings
 from app.db.sqlite import check_database, initialize_database
 
@@ -15,9 +16,11 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(
     title="OSINT CaseOps API",
     version="0.1.0",
-    summary="Local-first API foundation for OSINT CaseOps.",
+    summary="Local-first API for scoped OSINT case operations.",
     lifespan=lifespan,
 )
+
+app.include_router(cases_router)
 
 
 @app.get("/health")

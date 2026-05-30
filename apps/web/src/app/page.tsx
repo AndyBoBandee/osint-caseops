@@ -1,98 +1,90 @@
+import { CaseDashboard, type CaseSummary } from "./case-dashboard";
+
 type HealthResponse = {
   status: string;
   service?: string;
 };
 
-async function getApiHealth(): Promise<HealthResponse> {
-  const apiBaseUrl = process.env.API_BASE_URL ?? "http://localhost:8000";
+const apiBaseUrl = process.env.API_BASE_URL ?? "http://127.0.0.1:8000";
 
+async function getApiJson<T>(path: string, fallback: T): Promise<T> {
   try {
-    const response = await fetch(`${apiBaseUrl}/health`, {
+    const response = await fetch(`${apiBaseUrl}${path}`, {
       cache: "no-store",
     });
 
     if (!response.ok) {
-      return { status: "unavailable" };
+      return fallback;
     }
 
-    return response.json() as Promise<HealthResponse>;
+    return (await response.json()) as T;
   } catch {
-    return { status: "unavailable" };
+    return fallback;
   }
 }
 
-const workflowSteps = [
-  ["Scope", "Start each case with a lawful public-source boundary."],
-  ["Entity", "Add a domain or URL for passive review."],
-  ["Evidence", "Preserve source context, timestamps, and screenshots."],
-  ["Report", "Export findings with confidence and methodology."],
-];
-
-const docs = [
-  "docs/project/scope.md",
-  "docs/product/mvp.md",
-  "docs/security/responsible-use.md",
-];
-
 export default async function Home() {
-  const health = await getApiHealth();
-  const apiOnline = health.status === "ok";
+  const [health, cases] = await Promise.all([
+    getApiJson<HealthResponse>("/health", { status: "unavailable" }),
+    getApiJson<CaseSummary[]>("/cases", []),
+  ]);
 
   return (
-    <main className="page-shell">
-      <div className="workspace">
-        <section>
-          <div className="hero">
-            <h1>OSINT CaseOps</h1>
-            <p>
-              A local-first case workbench for ethical public-source investigations,
-              starting with passive domain and URL review.
-            </p>
-          </div>
+    <div className="oc-app oc-app-horizontal" data-theme="dark">
+      <aside className="oc-sidebar oc-menu-bar" aria-label="Primary">
+        <a className="oc-brand" href="#dashboard">
+          <span className="oc-brand-mark" aria-hidden="true" />
+          <span>OSINT CaseOps</span>
+        </a>
+        <nav className="oc-nav" aria-label="Workspace sections">
+          <a className="oc-nav-link is-active" href="#dashboard">
+            Dashboard
+          </a>
+          <a className="oc-nav-link" href="#case-detail">
+            Case Detail
+          </a>
+          <a className="oc-nav-link" href="#entity-profile">
+            Entity Profile
+          </a>
+          <a className="oc-nav-link" href="#evidence-viewer">
+            Evidence
+          </a>
+          <a className="oc-nav-link" href="#relationship-graph">
+            Graph
+          </a>
+          <a className="oc-nav-link" href="#report-preview">
+            Report
+          </a>
+        </nav>
+        <div
+          className={
+            health.status === "ok"
+              ? "oc-badge oc-badge-success oc-system-status"
+              : "oc-badge oc-badge-medium oc-system-status"
+          }
+        >
+          API {health.status === "ok" ? "online" : "unavailable"}
+        </div>
+      </aside>
 
-          <div className="section">
-            <h2>MVP Workflow</h2>
-            <ul className="flow-list">
-              {workflowSteps.map(([title, description]) => (
-                <li key={title}>
-                  <strong>{title}</strong>
-                  <span>{description}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </section>
+      <main className="oc-main">
+        <div className="oc-main-inner">
+          <header className="oc-topbar">
+            <div className="oc-page-header">
+              <h1 className="oc-page-title">Case workbench</h1>
+              <p className="oc-page-subtitle">
+                Scoped public-source research, evidence tracking, relationship review, and
+                report drafting in one local workspace.
+              </p>
+            </div>
+            <a className="oc-btn oc-btn-primary" href="#case-detail">
+              New case
+            </a>
+          </header>
 
-        <aside className="panel" aria-label="Foundation status">
-          <h2>Foundation Status</h2>
-          <div className={apiOnline ? "status-pill" : "status-pill warning"}>
-            API {apiOnline ? "online" : "unavailable"}
-          </div>
-
-          <div className="section">
-            <ul className="status-list">
-              <li className="status-item">
-                <strong>Web</strong>
-                <span>Next.js scaffold</span>
-              </li>
-              <li className="status-item">
-                <strong>API</strong>
-                <span>{health.service ?? "FastAPI health check"}</span>
-              </li>
-              <li className="status-item">
-                <strong>Storage</strong>
-                <span>SQLite local-first path</span>
-              </li>
-            </ul>
-          </div>
-
-          <div className="doc-links" aria-label="Project documents">
-            {docs.map((doc) => (
-              <code key={doc}>{doc}</code>
-            ))}
-          </div>
-        </aside>
-      </div>
-    </main>
+          <CaseDashboard initialCases={cases} initialApiOnline={health.status === "ok"} />
+        </div>
+      </main>
+    </div>
   );
 }

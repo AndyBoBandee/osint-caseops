@@ -6,6 +6,8 @@ The MVP should prove that OSINT CaseOps can support one complete, ethical, local
 
 The first workflow is domain and URL investigation for scam, vendor, brand, and small-business exposure review.
 
+A secondary MVP focus is passive public-news monitoring for scoped fraud and scam trend analysis. Users should be able to scan public news or search sources through Brave Search API or a similar provider for configured keywords related to scams, fraud, crime, impersonation, and adjacent public-interest risks.
+
 ## MVP Brand Promise
 
 OSINT CaseOps helps users investigate domains and URLs through scoped cases, preserved evidence, confidence-rated findings, and exportable reports.
@@ -27,10 +29,11 @@ Examples:
 2. User selects a lawful scope category.
 3. User adds a domain or URL.
 4. System runs passive enrichment.
-5. User reviews results and generated findings.
-6. User captures or confirms evidence.
-7. User adds notes and confidence labels.
-8. User exports a Markdown report.
+5. User optionally runs a public news keyword scan for the case.
+6. User reviews results and generated findings.
+7. User captures or confirms evidence.
+8. User adds notes and confidence labels.
+9. User exports a Markdown report.
 
 ## Required MVP Screens
 
@@ -39,8 +42,10 @@ Examples:
 - Case overview.
 - Entity detail.
 - Enrichment results.
+- Public news monitoring results.
 - Evidence list.
 - Finding editor.
+- Trend summary.
 - Relationship graph.
 - Timeline.
 - Report preview/export.
@@ -69,6 +74,9 @@ Secondary action: `View documentation`
 - Relationship persistence.
 - Timeline event generation.
 - Enrichment run tracking.
+- Public news/search ingestion run tracking.
+- Keyword set management for scoped news monitoring.
+- Trend grouping by keyword, source, time window, and repeated theme.
 - Markdown report generation.
 - JSON case bundle export.
 
@@ -84,7 +92,9 @@ Secondary action: `View documentation`
 - Screenshot capture.
 - robots.txt check.
 - sitemap.xml check.
+- Public news/search API lookup through Brave Search API or a similar provider.
+- Public result metadata capture, including source URL, publisher, title, snippet, published date when available, retrieval timestamp, and query keyword.
 
 ## Acceptance Criteria
 
-The MVP is complete when a user can run the app locally, create a scoped case, investigate a domain or URL, preserve evidence, add findings, view relationships and timeline events, and export a Markdown report without leaving the app.
+The MVP is complete when a user can run the app locally, create a scoped case, investigate a domain or URL, run a scoped public news keyword scan, preserve evidence, add findings, review a basic fraud trend summary, view relationships and timeline events, and export a Markdown report without leaving the app.

@@ -1,0 +1,1200 @@
+/*
+  OSINT CaseOps UI Stylesheet
+  Version: 0.1
+  Purpose: Repo-ready visual system for Codex or a frontend agent to apply consistently.
+
+  Design intent:
+  - Professional, calm, analyst-focused OSINT workspace
+  - Dark navy/slate base with cyan signal accents
+  - Case-first layouts, evidence-first UI, confidence/status badges
+  - Avoid plain black/white, hacker-neon overload, skull/mask/crosshair aesthetics
+
+  Suggested usage:
+  1. Save as: src/styles/osint-caseops.css
+  2. Import once in your app entry:
+     import "./styles/osint-caseops.css";
+  3. Add data-theme="dark" or data-theme="light" to <html> or app root.
+  4. Use the component classes below for dashboards, cases, entities, evidence, reports, and graph views.
+*/
+
+/* ------------------------------------------------------------
+   1. Design Tokens
+------------------------------------------------------------ */
+
+:root {
+  /* Brand */
+  --brand-navy-950: #050914;
+  --brand-navy-900: #0B1220;
+  --brand-navy-850: #0F172A;
+  --brand-navy-800: #111827;
+  --brand-slate-700: #1E3A5F;
+  --brand-slate-600: #2B4A70;
+  --brand-cyan-500: #22D3EE;
+  --brand-cyan-400: #38E8FF;
+  --brand-cyan-300: #67E8F9;
+
+  /* Status */
+  --status-success: #22C55E;
+  --status-warning: #F59E0B;
+  --status-danger: #EF4444;
+  --status-info: #3B82F6;
+  --status-muted: #64748B;
+  --status-purple: #A855F7;
+
+  /* Severity */
+  --severity-critical: #EF4444;
+  --severity-high: #F97316;
+  --severity-medium: #F59E0B;
+  --severity-low: #1E3A5F;
+  --severity-info: #64748B;
+
+  /* Typography */
+  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+
+  /* Spacing */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+
+  /* Radius */
+  --radius-sm: 0.375rem;
+  --radius-md: 0.625rem;
+  --radius-lg: 0.875rem;
+  --radius-xl: 1.125rem;
+  --radius-2xl: 1.5rem;
+  --radius-full: 999px;
+
+  /* Motion */
+  --duration-fast: 120ms;
+  --duration-base: 180ms;
+  --duration-slow: 260ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Layout */
+  --sidebar-width: 17rem;
+  --topbar-height: 4.25rem;
+  --content-max-width: 1440px;
+}
+
+/* ------------------------------------------------------------
+   2. Theme Tokens
+------------------------------------------------------------ */
+
+[data-theme="dark"],
+:root {
+  color-scheme: dark;
+
+  --bg-app: #050914;
+  --bg-shell: #07111F;
+  --bg-sidebar: rgba(7, 17, 31, 0.94);
+  --bg-topbar: rgba(7, 17, 31, 0.78);
+  --bg-card: rgba(15, 23, 42, 0.82);
+  --bg-card-solid: #0F172A;
+  --bg-card-hover: rgba(30, 58, 95, 0.52);
+  --bg-subtle: rgba(100, 116, 139, 0.12);
+  --bg-elevated: rgba(15, 23, 42, 0.96);
+  --bg-input: rgba(5, 9, 20, 0.62);
+
+  --text-primary: #F8FAFC;
+  --text-secondary: #CBD5E1;
+  --text-muted: #94A3B8;
+  --text-faint: #64748B;
+  --text-inverse: #050914;
+
+  --border-subtle: rgba(148, 163, 184, 0.14);
+  --border-strong: rgba(148, 163, 184, 0.24);
+  --border-accent: rgba(34, 211, 238, 0.48);
+
+  --shadow-card: 0 18px 48px rgba(0, 0, 0, 0.34);
+  --shadow-elevated: 0 28px 70px rgba(0, 0, 0, 0.44);
+  --shadow-glow-cyan: 0 0 0 1px rgba(34, 211, 238, 0.16), 0 0 32px rgba(34, 211, 238, 0.14);
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+
+  --bg-app: #F8FAFC;
+  --bg-shell: #EEF4F8;
+  --bg-sidebar: rgba(255, 255, 255, 0.92);
+  --bg-topbar: rgba(255, 255, 255, 0.82);
+  --bg-card: rgba(255, 255, 255, 0.88);
+  --bg-card-solid: #FFFFFF;
+  --bg-card-hover: #F1F5F9;
+  --bg-subtle: rgba(30, 58, 95, 0.08);
+  --bg-elevated: #FFFFFF;
+  --bg-input: #FFFFFF;
+
+  --text-primary: #0B1220;
+  --text-secondary: #334155;
+  --text-muted: #64748B;
+  --text-faint: #94A3B8;
+  --text-inverse: #FFFFFF;
+
+  --border-subtle: rgba(15, 23, 42, 0.10);
+  --border-strong: rgba(15, 23, 42, 0.18);
+  --border-accent: rgba(8, 145, 178, 0.42);
+
+  --shadow-card: 0 14px 34px rgba(15, 23, 42, 0.08);
+  --shadow-elevated: 0 24px 60px rgba(15, 23, 42, 0.14);
+  --shadow-glow-cyan: 0 0 0 1px rgba(8, 145, 178, 0.18), 0 0 24px rgba(8, 145, 178, 0.10);
+}
+
+/* ------------------------------------------------------------
+   3. Base Reset
+------------------------------------------------------------ */
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-height: 100%;
+  background: var(--bg-app);
+  font-family: var(--font-sans);
+  text-rendering: geometricPrecision;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  background:
+    radial-gradient(circle at top left, rgba(34, 211, 238, 0.11), transparent 32rem),
+    radial-gradient(circle at 80% 10%, rgba(59, 130, 246, 0.12), transparent 28rem),
+    linear-gradient(180deg, var(--bg-shell), var(--bg-app));
+  color: var(--text-primary);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+a {
+  color: var(--brand-cyan-300);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--brand-cyan-400);
+}
+
+::selection {
+  background: rgba(34, 211, 238, 0.3);
+}
+
+/* ------------------------------------------------------------
+   4. App Shell
+------------------------------------------------------------ */
+
+.oc-app {
+  display: grid;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.oc-sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  padding: var(--space-5);
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--border-subtle);
+  backdrop-filter: blur(18px);
+}
+
+.oc-main {
+  min-width: 0;
+  padding: var(--space-5);
+}
+
+.oc-main-inner {
+  width: min(100%, var(--content-max-width));
+  margin: 0 auto;
+}
+
+.oc-topbar {
+  position: sticky;
+  top: var(--space-5);
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  min-height: var(--topbar-height);
+  margin-bottom: var(--space-5);
+  padding: var(--space-4) var(--space-5);
+  background: var(--bg-topbar);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(18px);
+}
+
+.oc-page-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.oc-page-title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: clamp(1.5rem, 2vw, 2rem);
+  font-weight: 750;
+  letter-spacing: -0.035em;
+}
+
+.oc-page-subtitle {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.9375rem;
+}
+
+/* ------------------------------------------------------------
+   5. Brand and Navigation
+------------------------------------------------------------ */
+
+.oc-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-8);
+  color: var(--text-primary);
+  font-weight: 750;
+  letter-spacing: -0.02em;
+}
+
+.oc-brand-mark {
+  display: grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  place-items: center;
+  border: 1px solid rgba(34, 211, 238, 0.35);
+  border-radius: 0.85rem;
+  background:
+    linear-gradient(135deg, rgba(34, 211, 238, 0.22), rgba(59, 130, 246, 0.08)),
+    rgba(15, 23, 42, 0.76);
+  box-shadow: var(--shadow-glow-cyan);
+}
+
+.oc-brand-mark::before {
+  content: "";
+  width: 0.8rem;
+  height: 0.8rem;
+  border: 2px solid var(--brand-cyan-400);
+  border-radius: 0.25rem;
+  transform: rotate(45deg);
+}
+
+.oc-nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.oc-nav-link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0.72rem 0.85rem;
+  color: var(--text-secondary);
+  border: 1px solid transparent;
+  border-radius: var(--radius-lg);
+  transition:
+    background var(--duration-base) var(--ease-standard),
+    border-color var(--duration-base) var(--ease-standard),
+    color var(--duration-base) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard);
+}
+
+.oc-nav-link:hover {
+  color: var(--text-primary);
+  background: var(--bg-subtle);
+  border-color: var(--border-subtle);
+}
+
+.oc-nav-link[aria-current="page"],
+.oc-nav-link.is-active {
+  color: var(--brand-cyan-300);
+  background: linear-gradient(135deg, rgba(34, 211, 238, 0.16), rgba(59, 130, 246, 0.08));
+  border-color: rgba(34, 211, 238, 0.24);
+  box-shadow: inset 3px 0 0 rgba(34, 211, 238, 0.82);
+}
+
+.oc-nav-icon {
+  width: 1rem;
+  height: 1rem;
+  color: currentColor;
+  opacity: 0.9;
+}
+
+/* ------------------------------------------------------------
+   6. Cards and Panels
+------------------------------------------------------------ */
+
+.oc-grid {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.oc-grid-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.oc-grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.oc-grid-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.oc-card {
+  position: relative;
+  overflow: hidden;
+  padding: var(--space-5);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.01)),
+    var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow-card);
+}
+
+.oc-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(135deg, rgba(34, 211, 238, 0.055), transparent 38%);
+}
+
+.oc-card-header {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.oc-card-title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.oc-card-description {
+  margin: var(--space-1) 0 0;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.oc-panel {
+  padding: var(--space-4);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+}
+
+.oc-stat-card {
+  min-height: 8.25rem;
+}
+
+.oc-stat-label {
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.oc-stat-value {
+  margin-top: var(--space-2);
+  color: var(--text-primary);
+  font-size: 2rem;
+  font-weight: 780;
+  letter-spacing: -0.05em;
+}
+
+.oc-stat-trend {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+  color: var(--status-success);
+  font-size: 0.8125rem;
+  font-weight: 650;
+}
+
+.oc-stat-trend.is-negative {
+  color: var(--status-danger);
+}
+
+/* ------------------------------------------------------------
+   7. Buttons
+------------------------------------------------------------ */
+
+.oc-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 2.5rem;
+  padding: 0.65rem 1rem;
+  color: var(--text-primary);
+  font-weight: 700;
+  font-size: 0.9rem;
+  line-height: 1;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--bg-card-solid);
+  cursor: pointer;
+  transition:
+    transform var(--duration-fast) var(--ease-standard),
+    background var(--duration-base) var(--ease-standard),
+    border-color var(--duration-base) var(--ease-standard),
+    box-shadow var(--duration-base) var(--ease-standard);
+}
+
+.oc-btn:hover {
+  transform: translateY(-1px);
+  background: var(--bg-card-hover);
+  border-color: var(--border-strong);
+}
+
+.oc-btn:focus-visible {
+  outline: 3px solid rgba(34, 211, 238, 0.35);
+  outline-offset: 2px;
+}
+
+.oc-btn-primary {
+  color: #FFFFFF;
+  background: linear-gradient(135deg, #2563EB, #0891B2);
+  border-color: rgba(34, 211, 238, 0.42);
+  box-shadow: 0 14px 34px rgba(37, 99, 235, 0.25);
+}
+
+.oc-btn-primary:hover {
+  background: linear-gradient(135deg, #1D4ED8, #0E7490);
+  box-shadow: 0 18px 44px rgba(37, 99, 235, 0.32);
+}
+
+.oc-btn-ghost {
+  background: transparent;
+  box-shadow: none;
+}
+
+.oc-btn-danger {
+  color: #FFFFFF;
+  background: linear-gradient(135deg, #DC2626, #B91C1C);
+  border-color: rgba(239, 68, 68, 0.42);
+}
+
+.oc-btn-sm {
+  min-height: 2rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.8125rem;
+}
+
+/* ------------------------------------------------------------
+   8. Forms and Inputs
+------------------------------------------------------------ */
+
+.oc-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.oc-label {
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+
+.oc-input,
+.oc-select,
+.oc-textarea {
+  width: 100%;
+  min-height: 2.65rem;
+  padding: 0.72rem 0.85rem;
+  color: var(--text-primary);
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  transition:
+    border-color var(--duration-base) var(--ease-standard),
+    box-shadow var(--duration-base) var(--ease-standard),
+    background var(--duration-base) var(--ease-standard);
+}
+
+.oc-textarea {
+  min-height: 8rem;
+  resize: vertical;
+}
+
+.oc-input::placeholder,
+.oc-textarea::placeholder {
+  color: var(--text-faint);
+}
+
+.oc-input:focus,
+.oc-select:focus,
+.oc-textarea:focus {
+  outline: none;
+  border-color: var(--border-accent);
+  box-shadow: 0 0 0 4px rgba(34, 211, 238, 0.11);
+}
+
+/* ------------------------------------------------------------
+   9. Badges, Status, Confidence
+------------------------------------------------------------ */
+
+.oc-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 1.6rem;
+  padding: 0.28rem 0.56rem;
+  font-size: 0.75rem;
+  font-weight: 750;
+  line-height: 1;
+  border: 1px solid transparent;
+  border-radius: var(--radius-full);
+  white-space: nowrap;
+}
+
+.oc-badge::before {
+  content: "";
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: var(--radius-full);
+  background: currentColor;
+}
+
+.oc-badge-high,
+.oc-badge-success {
+  color: var(--status-success);
+  background: rgba(34, 197, 94, 0.12);
+  border-color: rgba(34, 197, 94, 0.22);
+}
+
+.oc-badge-medium,
+.oc-badge-warning {
+  color: var(--status-warning);
+  background: rgba(245, 158, 11, 0.13);
+  border-color: rgba(245, 158, 11, 0.24);
+}
+
+.oc-badge-low,
+.oc-badge-muted {
+  color: var(--status-muted);
+  background: rgba(100, 116, 139, 0.13);
+  border-color: rgba(100, 116, 139, 0.22);
+}
+
+.oc-badge-danger {
+  color: var(--status-danger);
+  background: rgba(239, 68, 68, 0.13);
+  border-color: rgba(239, 68, 68, 0.24);
+}
+
+.oc-badge-info {
+  color: var(--status-info);
+  background: rgba(59, 130, 246, 0.13);
+  border-color: rgba(59, 130, 246, 0.24);
+}
+
+.oc-badge-purple {
+  color: var(--status-purple);
+  background: rgba(168, 85, 247, 0.13);
+  border-color: rgba(168, 85, 247, 0.24);
+}
+
+/* ------------------------------------------------------------
+   10. Tables
+------------------------------------------------------------ */
+
+.oc-table-wrap {
+  overflow: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+}
+
+.oc-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 720px;
+}
+
+.oc-table th,
+.oc-table td {
+  padding: 0.95rem 1rem;
+  border-bottom: 1px solid var(--border-subtle);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.oc-table th {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  background: rgba(100, 116, 139, 0.08);
+}
+
+.oc-table td {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.oc-table tr:hover td {
+  background: rgba(34, 211, 238, 0.035);
+}
+
+.oc-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.oc-mono {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+}
+
+/* ------------------------------------------------------------
+   11. Tabs
+------------------------------------------------------------ */
+
+.oc-tabs {
+  display: flex;
+  gap: var(--space-1);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.oc-tab {
+  position: relative;
+  padding: 0.85rem 1rem;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  font-weight: 700;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.oc-tab:hover {
+  color: var(--text-primary);
+}
+
+.oc-tab.is-active,
+.oc-tab[aria-selected="true"] {
+  color: var(--brand-cyan-300);
+}
+
+.oc-tab.is-active::after,
+.oc-tab[aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  right: 0.75rem;
+  bottom: -1px;
+  left: 0.75rem;
+  height: 2px;
+  background: var(--brand-cyan-500);
+  border-radius: var(--radius-full);
+}
+
+/* ------------------------------------------------------------
+   12. Case Detail and Entity Pages
+------------------------------------------------------------ */
+
+.oc-case-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.oc-entity-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+}
+
+.oc-entity-value {
+  font-family: var(--font-mono);
+  font-size: clamp(1.25rem, 2vw, 1.75rem);
+  font-weight: 750;
+  letter-spacing: -0.04em;
+}
+
+.oc-definition-list {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.oc-definition-row {
+  display: grid;
+  grid-template-columns: 11rem minmax(0, 1fr);
+  gap: var(--space-4);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.oc-definition-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.oc-definition-term {
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+
+.oc-definition-value {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+/* ------------------------------------------------------------
+   13. Evidence Viewer
+------------------------------------------------------------ */
+
+.oc-evidence-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 22rem;
+  gap: var(--space-5);
+}
+
+.oc-evidence-frame {
+  display: grid;
+  min-height: 32rem;
+  place-items: center;
+  padding: var(--space-5);
+  background:
+    linear-gradient(45deg, rgba(100, 116, 139, 0.08) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(100, 116, 139, 0.08) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(100, 116, 139, 0.08) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(100, 116, 139, 0.08) 75%);
+  background-size: 1.25rem 1.25rem;
+  background-position: 0 0, 0 0.625rem, 0.625rem -0.625rem, -0.625rem 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-2xl);
+}
+
+.oc-evidence-image {
+  max-width: 100%;
+  max-height: 70vh;
+  object-fit: contain;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-elevated);
+}
+
+.oc-evidence-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* ------------------------------------------------------------
+   14. Relationship Graph
+------------------------------------------------------------ */
+
+.oc-graph {
+  position: relative;
+  min-height: 34rem;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at center, rgba(34, 211, 238, 0.09), transparent 22rem),
+    linear-gradient(180deg, rgba(15, 23, 42, 0.72), rgba(5, 9, 20, 0.68));
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-2xl);
+}
+
+.oc-graph-grid {
+  position: absolute;
+  inset: 0;
+  opacity: 0.28;
+  background-image:
+    linear-gradient(rgba(148, 163, 184, 0.10) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.10) 1px, transparent 1px);
+  background-size: 2.25rem 2.25rem;
+}
+
+.oc-graph-node {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0.58rem 0.75rem;
+  color: var(--text-primary);
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid rgba(34, 211, 238, 0.28);
+  border-radius: var(--radius-full);
+  box-shadow: var(--shadow-card);
+}
+
+.oc-graph-node.is-primary {
+  border-color: rgba(34, 211, 238, 0.72);
+  box-shadow: var(--shadow-glow-cyan);
+}
+
+.oc-graph-node-dot {
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: var(--radius-full);
+  background: var(--brand-cyan-500);
+}
+
+/* ------------------------------------------------------------
+   15. Timeline
+------------------------------------------------------------ */
+
+.oc-timeline {
+  position: relative;
+  display: grid;
+  gap: var(--space-4);
+  padding-left: var(--space-5);
+}
+
+.oc-timeline::before {
+  content: "";
+  position: absolute;
+  top: 0.35rem;
+  bottom: 0.35rem;
+  left: 0.35rem;
+  width: 1px;
+  background: var(--border-strong);
+}
+
+.oc-timeline-item {
+  position: relative;
+  padding: var(--space-4);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+}
+
+.oc-timeline-item::before {
+  content: "";
+  position: absolute;
+  top: 1.1rem;
+  left: -1.19rem;
+  width: 0.7rem;
+  height: 0.7rem;
+  background: var(--brand-cyan-500);
+  border: 3px solid var(--bg-card-solid);
+  border-radius: var(--radius-full);
+  box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.12);
+}
+
+.oc-timeline-title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 0.95rem;
+  font-weight: 750;
+}
+
+.oc-timeline-meta {
+  margin-top: var(--space-1);
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+}
+
+/* ------------------------------------------------------------
+   16. Report Preview
+------------------------------------------------------------ */
+
+.oc-report-layout {
+  display: grid;
+  grid-template-columns: 18rem minmax(0, 1fr);
+  gap: var(--space-5);
+}
+
+.oc-report-sidebar {
+  position: sticky;
+  top: calc(var(--topbar-height) + var(--space-10));
+  align-self: start;
+}
+
+.oc-report-page {
+  max-width: 60rem;
+  min-height: 70rem;
+  margin: 0 auto;
+  padding: 4rem;
+  color: #0B1220;
+  background: #FFFFFF;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-elevated);
+}
+
+.oc-report-page h1,
+.oc-report-page h2,
+.oc-report-page h3 {
+  color: #0B1220;
+  letter-spacing: -0.035em;
+}
+
+.oc-report-page p,
+.oc-report-page li {
+  color: #334155;
+  line-height: 1.7;
+}
+
+.oc-report-metric-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: var(--space-6) 0;
+}
+
+.oc-report-metric {
+  padding: var(--space-4);
+  text-align: center;
+  border: 1px solid #E2E8F0;
+  border-radius: var(--radius-md);
+}
+
+.oc-report-metric-value {
+  display: block;
+  color: #0B1220;
+  font-size: 1.4rem;
+  font-weight: 800;
+}
+
+/* ------------------------------------------------------------
+   17. Alerts and Callouts
+------------------------------------------------------------ */
+
+.oc-callout {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  color: var(--text-secondary);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  border-left: 4px solid var(--brand-cyan-500);
+  border-radius: var(--radius-xl);
+}
+
+.oc-callout-title {
+  margin: 0 0 var(--space-1);
+  color: var(--text-primary);
+  font-weight: 750;
+}
+
+.oc-callout-body {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+
+.oc-callout-warning {
+  border-left-color: var(--status-warning);
+}
+
+.oc-callout-danger {
+  border-left-color: var(--status-danger);
+}
+
+.oc-callout-success {
+  border-left-color: var(--status-success);
+}
+
+/* ------------------------------------------------------------
+   18. Utility Classes
+------------------------------------------------------------ */
+
+.oc-muted {
+  color: var(--text-muted);
+}
+
+.oc-faint {
+  color: var(--text-faint);
+}
+
+.oc-text-success {
+  color: var(--status-success);
+}
+
+.oc-text-warning {
+  color: var(--status-warning);
+}
+
+.oc-text-danger {
+  color: var(--status-danger);
+}
+
+.oc-divider {
+  height: 1px;
+  margin: var(--space-5) 0;
+  background: var(--border-subtle);
+}
+
+.oc-surface {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-2xl);
+}
+
+.oc-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.42) transparent;
+}
+
+.oc-scrollbar::-webkit-scrollbar {
+  width: 0.6rem;
+  height: 0.6rem;
+}
+
+.oc-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.42);
+  border-radius: var(--radius-full);
+}
+
+.oc-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ------------------------------------------------------------
+   19. Responsive Rules
+------------------------------------------------------------ */
+
+@media (max-width: 1180px) {
+  .oc-grid-4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .oc-grid-3 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .oc-evidence-layout,
+  .oc-report-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .oc-report-sidebar {
+    position: static;
+  }
+}
+
+@media (max-width: 860px) {
+  .oc-app {
+    grid-template-columns: 1fr;
+  }
+
+  .oc-sidebar {
+    position: static;
+    height: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .oc-nav {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .oc-topbar,
+  .oc-entity-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .oc-grid-2,
+  .oc-grid-3,
+  .oc-grid-4 {
+    grid-template-columns: 1fr;
+  }
+
+  .oc-definition-row {
+    grid-template-columns: 1fr;
+    gap: var(--space-1);
+  }
+
+  .oc-report-page {
+    padding: var(--space-6);
+  }
+
+  .oc-report-metric-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .oc-main {
+    padding: var(--space-3);
+  }
+
+  .oc-sidebar {
+    padding: var(--space-3);
+  }
+
+  .oc-nav {
+    grid-template-columns: 1fr;
+  }
+
+  .oc-report-page {
+    padding: var(--space-4);
+  }
+
+  .oc-report-metric-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ------------------------------------------------------------
+   20. Example HTML Structure for Codex
+
+   <div class="oc-app" data-theme="dark">
+     <aside class="oc-sidebar">
+       <a class="oc-brand" href="/">
+         <span class="oc-brand-mark"></span>
+         <span>OSINT CaseOps</span>
+       </a>
+       <nav class="oc-nav">
+         <a class="oc-nav-link is-active">Overview</a>
+         <a class="oc-nav-link">Cases</a>
+         <a class="oc-nav-link">Entities</a>
+       </nav>
+     </aside>
+
+     <main class="oc-main">
+       <div class="oc-main-inner">
+         <header class="oc-topbar">
+           <div class="oc-page-header">
+             <h1 class="oc-page-title">Overview</h1>
+             <p class="oc-page-subtitle">Welcome back. Here is what changed across your cases.</p>
+           </div>
+           <button class="oc-btn oc-btn-primary">New case</button>
+         </header>
+
+         <section class="oc-grid oc-grid-4">
+           <article class="oc-card oc-stat-card">
+             <span class="oc-stat-label">Active cases</span>
+             <div class="oc-stat-value">12</div>
+             <div class="oc-stat-trend">+2 from last week</div>
+           </article>
+         </section>
+       </div>
+     </main>
+   </div>
+------------------------------------------------------------ */
