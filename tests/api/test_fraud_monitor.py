@@ -1,4 +1,6 @@
 from pathlib import Path
+from datetime import UTC, datetime, timedelta
+from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
@@ -50,6 +52,9 @@ def test_dashboard_bootstraps_single_fraud_monitor_case(tmp_path: Path, monkeypa
     assert dashboard["runtime"]["is_running"] is False
     assert dashboard["runtime"]["ready_provider_count"] == 2
     assert dashboard["runtime"]["last_error_message"] == ""
+    assert dashboard["providers"][0]["request_limit"] == "Up to 10 result(s) per keyword per run."
+    assert dashboard["providers"][0]["timeout_seconds"] == 8
+    assert dashboard["providers"][0]["last_run_status"] == ""
 
 
 def test_manual_fraud_job_runs_configured_providers_and_stores_results(
@@ -90,12 +95,90 @@ def test_fraud_job_records_partial_provider_failures(tmp_path: Path, monkeypatch
 
     with make_client(tmp_path, monkeypatch) as client:
         response = client.post("/fraud-monitor/jobs")
+        dashboard = client.get("/fraud-monitor/dashboard").json()
 
     assert response.status_code == 200
     job = response.json()
     assert job["status"] == "partial"
     assert job["result_count"] == 1
     assert "gdelt: Provider request timed out" in job["error_message"]
+    gdelt = next(provider for provider in dashboard["providers"] if provider["name"] == "gdelt")
+    assert gdelt["status"] == "timeout"
+    assert gdelt["last_run_status"] == "failed"
+    assert "timed out" in gdelt["last_error_message"]
+
+
+def test_provider_health_distinguishes_missing_config_unsupported_and_partial_success(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    with make_client(tmp_path, monkeypatch, providers="brave,unknown,hn_algolia") as client:
+        client.get("/fraud-monitor/dashboard")
+        with fraud_monitor.connect() as connection:
+            settings = fraud_monitor.ensure_monitor_settings(connection)
+            connection.execute(
+                """
+                INSERT INTO news_ingestion_runs (
+                    id,
+                    case_id,
+                    keyword_set_id,
+                    provider,
+                    status,
+                    started_at,
+                    completed_at,
+                    query_keywords_json,
+                    result_count,
+                    error_message,
+                    created_at
+                )
+                VALUES (?, ?, NULL, 'hn_algolia', 'partial', ?, ?, ?, 1, ?, ?)
+                """,
+                (
+                    str(uuid4()),
+                    settings["case_id"],
+                    "2030-01-01T00:00:00Z",
+                    "2030-01-01T00:00:03Z",
+                    '["fraud"]',
+                    "fraud: provider returned a partial response",
+                    "2030-01-01T00:00:03Z",
+                ),
+            )
+        dashboard = client.get("/fraud-monitor/dashboard").json()
+
+    statuses = {provider["name"]: provider["status"] for provider in dashboard["providers"]}
+    assert statuses == {
+        "brave": "missing_config",
+        "unknown": "unsupported",
+        "hn_algolia": "partial_success",
+    }
+
+
+def test_scheduled_provider_timeout_uses_bounded_backoff(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    def fake_search(keyword: str, provider: str) -> list[ProviderResult]:
+        raise RuntimeError("provider timeout")
+
+    monkeypatch.setattr(fraud_monitor, "search_public_news_with_provider", fake_search)
+
+    with make_client(tmp_path, monkeypatch, providers="gdelt") as client:
+        client.patch("/fraud-monitor/schedule", json={"enabled": True, "interval_minutes": 5})
+        with fraud_monitor.connect() as connection:
+            fraud_monitor.ensure_monitor_settings(connection)
+            connection.execute(
+                "UPDATE fraud_monitor_settings SET next_run_at = ? WHERE id = 1",
+                ("2000-01-01T00:00:00Z",),
+            )
+        before = datetime.now(UTC)
+        fraud_monitor.run_due_fraud_monitor_jobs()
+        dashboard = client.get("/fraud-monitor/dashboard").json()
+
+    next_run_at = fraud_monitor.parse_utc(dashboard["schedule"]["next_run_at"])
+    assert dashboard["latest_job"]["trigger_type"] == "scheduled"
+    assert dashboard["latest_job"]["status"] == "failed"
+    assert timedelta(minutes=9) <= next_run_at - before <= timedelta(minutes=11)
+    assert dashboard["providers"][0]["next_retry_at"] == dashboard["schedule"]["next_run_at"]
 
 
 def test_manual_fraud_job_rejects_overlap(tmp_path: Path, monkeypatch) -> None:

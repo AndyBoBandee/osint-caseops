@@ -1,5 +1,6 @@
 from collections import Counter, defaultdict
 from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 import json
 import re
 import sqlite3
@@ -20,6 +21,8 @@ from app.core.config import get_settings
 RunStatus = Literal["success", "partial", "failed"]
 ReviewStatus = Literal["pending", "relevant", "not_relevant"]
 TrendGroupType = Literal["keyword", "source", "time_window", "theme"]
+SourceQuality = Literal["named_source", "unnamed_source"]
+RecencyCue = Literal["fresh", "recent", "older", "unknown"]
 
 NEWS_TIMEOUT_SECONDS = 8
 MAX_NEWS_BODY_BYTES = 512_000
@@ -190,6 +193,9 @@ class NewsResultRecord(BaseModel):
     seen_count: int = 1
     duplicate_count: int = 0
     theme: str
+    source_quality: SourceQuality
+    recency_cue: RecencyCue
+    prioritization_cue: str
     created_at: str
 
 
@@ -253,6 +259,7 @@ class TrendGroup(BaseModel):
     result_count: int
     sample_titles: list[str]
     source_attribution: list[str]
+    priority_cue: str
     confidence_language: str
 
 
@@ -302,7 +309,60 @@ def row_to_news_result(row: sqlite3.Row) -> dict[str, Any]:
     payload["evidence_analyst_note"] = payload.get("evidence_analyst_note") or ""
     payload["seen_count"] = int(payload.get("seen_count") or 1)
     payload["duplicate_count"] = max(payload["seen_count"] - 1, 0)
+    payload["source_quality"] = source_quality(payload)
+    payload["recency_cue"] = recency_cue(payload.get("published_at") or payload.get("retrieved_at", ""))
+    payload["prioritization_cue"] = prioritization_cue(payload)
     return payload
+
+
+def parse_source_datetime(value: str) -> datetime | None:
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    try:
+        parsed = datetime.fromisoformat(cleaned.replace("Z", "+00:00"))
+    except ValueError:
+        try:
+            parsed = parsedate_to_datetime(cleaned)
+        except (TypeError, ValueError):
+            if len(cleaned) >= 8 and re.fullmatch(r"\d{8}", cleaned[:8]):
+                parsed = datetime.strptime(cleaned[:8], "%Y%m%d").replace(tzinfo=UTC)
+            else:
+                return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def source_quality(row: dict[str, Any]) -> SourceQuality:
+    return "named_source" if str(row.get("publisher") or "").strip() else "unnamed_source"
+
+
+def recency_cue(value: str) -> RecencyCue:
+    parsed = parse_source_datetime(value)
+    if parsed is None:
+        return "unknown"
+    age_days = (datetime.now(UTC) - parsed).days
+    if age_days <= 2:
+        return "fresh"
+    if age_days <= 14:
+        return "recent"
+    return "older"
+
+
+def prioritization_cue(row: dict[str, Any]) -> str:
+    parts: list[str] = []
+    if row["recency_cue"] in {"fresh", "recent"}:
+        parts.append(f"{row['recency_cue']} public result")
+    else:
+        parts.append("older or undated public result")
+    if row["source_quality"] == "named_source":
+        parts.append("named source")
+    else:
+        parts.append("source attribution needs review")
+    if row["duplicate_count"] > 0:
+        parts.append(f"seen {row['seen_count']} times")
+    return "; ".join(parts)
 
 
 def row_to_news_run(row: sqlite3.Row, results: list[dict[str, Any]] | None = None) -> dict[str, Any]:
@@ -1061,12 +1121,24 @@ def build_group(group_type: TrendGroupType, label: str, rows: list[dict[str, Any
     count = len(rows)
     qualifier = "Possible" if count < 3 else "Repeated"
     source_text = ", ".join(publishers) if publishers else "public search results"
+    recency_counts = Counter(row.get("recency_cue", "unknown") for row in rows)
+    fresh_or_recent = recency_counts["fresh"] + recency_counts["recent"]
+    named_source_count = sum(1 for row in rows if row.get("source_quality") == "named_source")
+    if count >= 3 and fresh_or_recent:
+        priority_cue = "Prioritize for review: repeated recent public reporting."
+    elif fresh_or_recent and named_source_count:
+        priority_cue = "Review soon: recent public result from a named source."
+    elif named_source_count:
+        priority_cue = "Review when time allows: named source attribution is available."
+    else:
+        priority_cue = "Lower priority: attribution or publication date needs analyst review."
     return TrendGroup(
         group_type=group_type,
         label=label,
         result_count=count,
         sample_titles=sample_titles,
         source_attribution=publishers,
+        priority_cue=priority_cue,
         confidence_language=(
             f"{qualifier} pattern based on {count} stored public result"
             f"{'' if count == 1 else 's'} from {source_text}; analyst review required."

@@ -95,6 +95,28 @@ Use `OSINT_CASEOPS_NEWS_MAX_RESULTS` to cap results per provider. Use
 runs. Tests and smoke checks mock or avoid live provider calls and do not require network access or
 API credentials.
 
+Provider behavior is deliberately passive and bounded:
+
+| Provider | External request | Configuration | Per-run request limit | Timeout | Safety limit |
+| --- | --- | --- | --- | --- | --- |
+| `gdelt` | `GET https://api.gdeltproject.org/api/v2/doc/doc` | No key | Up to `min(OSINT_CASEOPS_NEWS_MAX_RESULTS, 50)` results for the fixed keyword | 8 seconds | Public document API only; no scraping, login, or private data access. |
+| `google_news_rss` | `GET https://news.google.com/rss/search` | No key | Up to `min(OSINT_CASEOPS_NEWS_MAX_RESULTS, 50)` RSS items for the fixed keyword | 8 seconds | Public RSS search only; snippets and links are leads for analyst review. |
+| `hn_algolia` | `GET https://hn.algolia.com/api/v1/search` | No key | Up to `min(OSINT_CASEOPS_NEWS_MAX_RESULTS, 50)` story hits for the fixed keyword | 8 seconds | Public Hacker News search only; comments or stories are not automated claims. |
+| `brave` | `GET https://api.search.brave.com/res/v1/news/search` | `BRAVE_SEARCH_API_KEY` required | Up to `min(OSINT_CASEOPS_NEWS_MAX_RESULTS, 20)` news results for the fixed keyword | 8 seconds | Optional provider; API key must stay local and out of commits. |
+| `fixture` | None | `OSINT_CASEOPS_ENABLE_FIXTURE_PROVIDER=1` required | Up to 2 deterministic local records | Not networked | Test-only public-source-style data for smoke and fixture coverage. |
+
+Provider health uses explicit states in the dashboard:
+
+- `ready`: configured and available for passive public search.
+- `missing_config`: the provider is known but required local configuration is absent.
+- `unsupported`: the provider is disabled for the current environment or not recognized.
+- `timeout`: the most recent provider run did not contribute results because it timed out or failed.
+- `partial_success`: the most recent provider run contributed some results and also recorded an issue.
+
+Scheduled scans run one job at a time. If a scheduled provider run times out or fails, the dashboard
+records the provider-specific reason and the next scheduled run uses bounded backoff before retrying.
+Manual runs still report the issue immediately and preserve the configured schedule interval.
+
 For deterministic local smoke checks, use the test-only fixture provider:
 
 ```sh

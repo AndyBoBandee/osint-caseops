@@ -116,6 +116,9 @@ def test_news_scan_stores_results_queue_evidence_trends_and_persists(
         assert len(run["results"]) == 4
         assert run["results"][0]["review_status"] == "pending"
         assert run["results"][0]["saved_as_evidence"] is False
+        assert run["results"][0]["source_quality"] == "named_source"
+        assert run["results"][0]["recency_cue"] in {"fresh", "recent"}
+        assert "named source" in run["results"][0]["prioritization_cue"]
 
         results_response = client.get(f"/cases/{case['id']}/news-results")
         assert results_response.status_code == 200
@@ -147,6 +150,7 @@ def test_news_scan_stores_results_queue_evidence_trends_and_persists(
         group_types = {group["group_type"] for group in trends["groups"]}
         assert {"keyword", "source", "time_window", "theme"}.issubset(group_types)
         assert all("analyst review required" in group["confidence_language"] for group in trends["groups"])
+        assert all(group["priority_cue"] for group in trends["groups"])
 
     with make_client(tmp_path, monkeypatch) as restarted_client:
         persisted_results = restarted_client.get(f"/cases/{case['id']}/news-results").json()

@@ -76,6 +76,7 @@ export type NewsResultRecord = {
   id: string;
   case_id: string;
   run_id: string;
+  provider: string;
   keyword: string;
   source_url: string;
   publisher: string;
@@ -86,7 +87,13 @@ export type NewsResultRecord = {
   review_status: NewsReviewStatus;
   saved_as_evidence: boolean;
   evidence_link_id: string | null;
+  evidence_analyst_note: string;
+  seen_count: number;
+  duplicate_count: number;
   theme: string;
+  source_quality: "named_source" | "unnamed_source";
+  recency_cue: "fresh" | "recent" | "older" | "unknown";
+  prioritization_cue: string;
   created_at: string;
 };
 
@@ -126,6 +133,7 @@ export type TrendGroup = {
   result_count: number;
   sample_titles: string[];
   source_attribution: string[];
+  priority_cue: string;
   confidence_language: string;
 };
 

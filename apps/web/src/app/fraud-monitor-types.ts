@@ -1,4 +1,4 @@
-export type ProviderStatus = "ready" | "needs_key" | "unsupported";
+export type ProviderStatus = "ready" | "missing_config" | "unsupported" | "timeout" | "partial_success";
 export type NewsReviewStatus = "pending" | "relevant" | "not_relevant";
 export type NewsRunStatus = "success" | "partial" | "failed";
 export type TrendGroupType = "keyword" | "source" | "time_window" | "theme";
@@ -16,6 +16,12 @@ export type ProviderInfo = {
   name: string;
   status: ProviderStatus;
   note: string;
+  request_limit: string;
+  timeout_seconds: number;
+  last_run_status: NewsRunStatus | "";
+  last_result_count: number;
+  last_error_message: string;
+  next_retry_at: string;
 };
 
 export type FraudMonitorSchedule = {
@@ -67,6 +73,9 @@ export type NewsResultRecord = {
   seen_count: number;
   duplicate_count: number;
   theme: string;
+  source_quality: "named_source" | "unnamed_source";
+  recency_cue: "fresh" | "recent" | "older" | "unknown";
+  prioritization_cue: string;
   created_at: string;
 };
 
@@ -89,6 +98,7 @@ export type TrendGroup = {
   result_count: number;
   sample_titles: string[];
   source_attribution: string[];
+  priority_cue: string;
   confidence_language: string;
 };
 

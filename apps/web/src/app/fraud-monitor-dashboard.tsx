@@ -39,7 +39,12 @@ function statusClass(status: string) {
   if (status === "success" || status === "ready" || status === "relevant") {
     return "oc-badge oc-badge-success";
   }
-  if (status === "partial" || status === "needs_key" || status === "pending") {
+  if (
+    status === "partial" ||
+    status === "missing_config" ||
+    status === "partial_success" ||
+    status === "pending"
+  ) {
     return "oc-badge oc-badge-medium";
   }
   if (status === "not_relevant") {
@@ -539,6 +544,7 @@ export function FraudMonitorDashboard({
                 <div className="oc-module-row" key={`${trend.group_type}:${trend.label}`}>
                   <div>
                     <strong>{trendLabel(trend)}</strong>
+                    <p>{trend.priority_cue}</p>
                     <p>{trend.confidence_language}</p>
                   </div>
                   <span className="oc-badge oc-badge-info">{trend.result_count}</span>
@@ -699,6 +705,10 @@ export function FraudMonitorDashboard({
                       {result.duplicate_count > 0 ? (
                         <span className="oc-badge oc-badge-medium">Seen {result.seen_count} times</span>
                       ) : null}
+                      <span className="oc-badge oc-badge-info">{result.recency_cue}</span>
+                      <span className={result.source_quality === "named_source" ? "oc-badge oc-badge-success" : "oc-badge oc-badge-muted"}>
+                        {result.source_quality === "named_source" ? "Named source" : "Source review"}
+                      </span>
                     </div>
                     <h3>{result.title || result.source_url}</h3>
                   </div>
@@ -713,6 +723,7 @@ export function FraudMonitorDashboard({
                   <span>Retrieved {compactDate(result.retrieved_at)}</span>
                   <span>Theme {result.theme || "uncategorized"}</span>
                 </div>
+                <p className="oc-empty-state">{result.prioritization_cue}</p>
                 <div className="fm-source-row">
                   <a className="oc-technical" href={result.source_url} rel="noreferrer noopener" target="_blank">
                     {result.source_url}
@@ -850,6 +861,14 @@ function ProviderRow({ provider }: { provider: ProviderInfo }) {
       <div>
         <strong>{providerLabel(provider.name)}</strong>
         <p>{provider.note}</p>
+        <p>
+          {provider.request_limit} Timeout {provider.timeout_seconds}s.
+          {provider.last_run_status
+            ? ` Last run ${provider.last_run_status}, ${provider.last_result_count} result(s).`
+            : ""}
+          {provider.next_retry_at ? ` Retry after ${compactDate(provider.next_retry_at)}.` : ""}
+        </p>
+        {provider.last_error_message ? <p>{provider.last_error_message}</p> : null}
       </div>
       <span className={statusClass(provider.status)}>{provider.status.replace("_", " ")}</span>
     </div>

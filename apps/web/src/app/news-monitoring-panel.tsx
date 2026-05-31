@@ -237,7 +237,10 @@ export function NewsMonitoringPanel({
                     <span>{result.publisher || "Unknown publisher"}</span>
                     {result.published_at ? <span>Published {result.published_at}</span> : null}
                     <span>Retrieved {result.retrieved_at}</span>
+                    <span>{result.recency_cue}</span>
+                    <span>{result.source_quality.replace("_", " ")}</span>
                   </div>
+                  <p className="oc-empty-state">{result.prioritization_cue}</p>
                   <a className="oc-technical" href={result.source_url} rel="noreferrer" target="_blank">
                     {result.source_url}
                   </a>
@@ -288,6 +291,7 @@ export function NewsMonitoringPanel({
                     <strong>
                       {trendTypeLabel(group.group_type)}: {group.label}
                     </strong>
+                    <p>{group.priority_cue}</p>
                     <p>{group.confidence_language}</p>
                   </div>
                   <span className="oc-badge oc-badge-info">{group.result_count}</span>

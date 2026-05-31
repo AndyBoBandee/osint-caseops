@@ -153,7 +153,7 @@ Verification:
 
 ## Milestone 6: Provider Quality And Trend Utility
 
-Status: Next.
+Status: Complete.
 
 Deliverables:
 
@@ -177,6 +177,8 @@ Verification:
   decisions, and trend grouping edge cases.
 - Docs name external request behavior, rate limits, configuration, and safety
   limits for each provider.
+- Rendered QA verifies provider health details, trend triage cues, and
+  source-quality/recency cues on the dashboard.
 - `make check` and `make smoke` pass with fixture-provider coverage.
 
 ## Milestone 7: Local Export And Audit Bundle

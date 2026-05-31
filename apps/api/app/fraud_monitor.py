@@ -17,6 +17,7 @@ from app.news_monitoring import (
     EvidenceLinkCreate,
     EvidenceLinkRecord,
     EvidenceLinkUpdate,
+    NEWS_TIMEOUT_SECONDS,
     NewsResultRecord,
     NewsResultUpdate,
     ReviewStatus,
@@ -42,7 +43,7 @@ FRAUD_MONITOR_CASE_ID = "fraud-monitor-system-case"
 DEFAULT_INTERVAL_MINUTES = 60
 
 TriggerType = Literal["manual", "scheduled"]
-ProviderStatus = Literal["ready", "needs_key", "unsupported"]
+ProviderStatus = Literal["ready", "missing_config", "unsupported", "timeout", "partial_success"]
 EvidenceFilter = Literal["all", "saved", "unsaved"]
 ResultSort = Literal[
     "retrieved_desc",
@@ -77,6 +78,12 @@ class ProviderInfo(BaseModel):
     name: str
     status: ProviderStatus
     note: str
+    request_limit: str
+    timeout_seconds: int
+    last_run_status: RunStatus | Literal[""]
+    last_result_count: int
+    last_error_message: str
+    next_retry_at: str
 
 
 class FraudMonitorSchedule(BaseModel):
@@ -168,27 +175,107 @@ def configured_providers() -> list[str]:
     return normalized
 
 
-def provider_info(provider: str) -> ProviderInfo:
+def provider_result_cap(provider: str) -> int:
+    return {
+        "brave": 20,
+        "fixture": 2,
+        "gdelt": 50,
+        "google_news_rss": 50,
+        "hn_algolia": 50,
+    }.get(provider, 0)
+
+
+def provider_request_limit(provider: str) -> str:
+    cap = provider_result_cap(provider)
+    if cap == 0:
+        return "Unsupported provider; no requests are made."
+    configured_limit = max(1, get_settings().news_search_max_results)
+    return f"Up to {min(configured_limit, cap)} result(s) per keyword per run."
+
+
+def provider_info(
+    provider: str,
+    connection: sqlite3.Connection | None = None,
+    case_id: str | None = None,
+    next_retry_at: str = "",
+) -> ProviderInfo:
     settings = get_settings()
+    base = {
+        "name": provider,
+        "request_limit": provider_request_limit(provider),
+        "timeout_seconds": NEWS_TIMEOUT_SECONDS,
+        "last_run_status": "",
+        "last_result_count": 0,
+        "last_error_message": "",
+        "next_retry_at": "",
+    }
     if provider == "fixture" and not settings.enable_fixture_provider:
         return ProviderInfo(
-            name=provider,
+            **base,
             status="unsupported",
             note="Set OSINT_CASEOPS_ENABLE_FIXTURE_PROVIDER=1 before using the fixture provider.",
         )
     if provider == "brave" and not settings.brave_search_api_key:
         return ProviderInfo(
-            name=provider,
-            status="needs_key",
+            **base,
+            status="missing_config",
             note="Set BRAVE_SEARCH_API_KEY before using Brave News Search.",
         )
     if provider not in {"brave", "fixture", "gdelt", "google_news_rss", "hn_algolia"}:
         return ProviderInfo(
-            name=provider,
+            **base,
             status="unsupported",
             note="Unsupported provider; remove it from OSINT_CASEOPS_FRAUD_MONITOR_PROVIDERS.",
         )
-    return ProviderInfo(name=provider, status="ready", note="Ready for passive public search.")
+    if connection is None or case_id is None:
+        return ProviderInfo(
+            **base,
+            status="ready",
+            note="Ready for passive public search.",
+        )
+
+    row = connection.execute(
+        """
+        SELECT status, result_count, error_message, completed_at
+        FROM news_ingestion_runs
+        WHERE case_id = ? AND provider = ?
+        ORDER BY completed_at DESC, created_at DESC
+        LIMIT 1
+        """,
+        (case_id, provider),
+    ).fetchone()
+    if row is None:
+        return ProviderInfo(
+            **base,
+            status="ready",
+            note="Ready for passive public search; no recent run recorded.",
+        )
+
+    error_message = row["error_message"] or ""
+    if "timed out" in error_message.lower() or "timeout" in error_message.lower():
+        status_value: ProviderStatus = "timeout"
+        note = "Last run timed out; scheduled runs use bounded backoff before retrying."
+    elif row["status"] == "partial":
+        status_value = "partial_success"
+        note = "Last run returned some public results and recorded provider issues."
+    elif row["status"] == "failed" and error_message:
+        status_value = "timeout"
+        note = "Last run did not contribute results; check provider availability before relying on it."
+    else:
+        status_value = "ready"
+        note = "Ready for passive public search."
+
+    return ProviderInfo(
+        **{
+            **base,
+            "status": status_value,
+            "note": note,
+            "last_run_status": row["status"],
+            "last_result_count": int(row["result_count"]),
+            "last_error_message": error_message,
+            "next_retry_at": next_retry_at if status_value in {"timeout", "partial_success"} else "",
+        }
+    )
 
 
 def provider_names_for_run() -> list[str]:
@@ -481,6 +568,26 @@ def normalize_provider_error(provider: str, exc: Exception) -> str:
     return f"{provider}: {message}"
 
 
+def retry_backoff_minutes(interval_minutes: int, status_value: RunStatus, error_message: str) -> int:
+    if status_value == "success" or not error_message:
+        return interval_minutes
+    base_interval = max(interval_minutes, 5)
+    if "timed out" in error_message.lower() or "timeout" in error_message.lower():
+        return min(base_interval * 2, 240)
+    return min(base_interval + 15, 240)
+
+
+def next_run_after(
+    trigger_type: TriggerType,
+    status_value: RunStatus,
+    interval_minutes: int,
+    error_message: str,
+) -> str:
+    if trigger_type == "scheduled":
+        return minutes_from_now(retry_backoff_minutes(interval_minutes, status_value, error_message))
+    return minutes_from_now(interval_minutes)
+
+
 def create_provider_run(
     connection: sqlite3.Connection,
     case_id: str,
@@ -608,6 +715,7 @@ def run_fraud_monitor_job_locked(trigger_type: TriggerType = "manual") -> FraudM
 
         completed_at = utc_now()
         interval_minutes = int(settings["interval_minutes"])
+        error_message = "; ".join(errors)
         connection.execute(
             """
             UPDATE fraud_monitor_jobs
@@ -617,7 +725,7 @@ def run_fraud_monitor_job_locked(trigger_type: TriggerType = "manual") -> FraudM
                 error_message = ?
             WHERE id = ?
             """,
-            (status, completed_at, result_count, "; ".join(errors), job_id),
+            (status, completed_at, result_count, error_message, job_id),
         )
         connection.execute(
             """
@@ -628,7 +736,12 @@ def run_fraud_monitor_job_locked(trigger_type: TriggerType = "manual") -> FraudM
                 updated_at = ?
             WHERE id = 1
             """,
-            (started_at, completed_at, minutes_from_now(interval_minutes), completed_at),
+            (
+                started_at,
+                completed_at,
+                next_run_after(trigger_type, status, interval_minutes, error_message),
+                completed_at,
+            ),
         )
         connection.execute("UPDATE cases SET updated_at = ? WHERE id = ?", (completed_at, case_id))
         row = connection.execute("SELECT * FROM fraud_monitor_jobs WHERE id = ?", (job_id,)).fetchone()
@@ -677,6 +790,10 @@ def build_dashboard(
         counts = result_counts(connection, case_id)
         evidence_total = evidence_count(connection, case_id)
         last_error_message, last_error_at = latest_error(connection)
+        providers = [
+            provider_info(provider, connection, case_id, settings["next_run_at"])
+            for provider in configured_providers()
+        ]
 
     trend_summary = get_news_trends(case_id)
     ready_provider_count = len(provider_names_for_run())
@@ -684,7 +801,7 @@ def build_dashboard(
     return FraudMonitorDashboard(
         keyword=FRAUD_KEYWORD,
         case_id=case_id,
-        providers=[provider_info(provider) for provider in configured_providers()],
+        providers=providers,
         schedule=row_to_schedule(settings),
         latest_job=jobs[0] if jobs else None,
         jobs=jobs,
