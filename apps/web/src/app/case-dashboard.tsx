@@ -35,6 +35,7 @@ type CaseDashboardProps = {
 };
 
 const confidenceOrder: Confidence[] = ["high", "medium", "low", "unknown"];
+const draftScanLoadingId = "__draft_scan__";
 
 function confidenceBadgeClass(confidence: Confidence) {
   if (confidence === "high") {
@@ -410,6 +411,53 @@ export function CaseDashboard({ initialCases, initialApiOnline }: CaseDashboardP
     }
   }
 
+  async function handleRunDraftScan() {
+    if (!selectedCase) {
+      return;
+    }
+
+    const keywords = keywordsFromInput(keywordDraft.keywords);
+    if (keywords.length === 0) {
+      setError("Enter at least one scoped public-interest keyword.");
+      setNotice("");
+      return;
+    }
+
+    setError("");
+    setNotice("");
+    setScanLoadingId(draftScanLoadingId);
+
+    try {
+      const run = await apiRequest<NewsIngestionRunRecord>(
+        `/cases/${selectedCase.id}/news-ingestion-runs`,
+        {
+          method: "POST",
+          body: JSON.stringify({ keywords }),
+        },
+      );
+      await refreshNewsWorkspace(selectedCase.id);
+      setCases((currentCases) =>
+        currentCases.map((caseRecord) =>
+          caseRecord.id === selectedCase.id
+            ? {
+                ...caseRecord,
+                updated_at: run.created_at,
+              }
+            : caseRecord,
+        ),
+      );
+      setNotice(
+        run.status === "success"
+          ? `Public scan stored ${run.result_count} result(s).`
+          : `Public scan completed with ${run.status} status.`,
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not run public news scan.");
+    } finally {
+      setScanLoadingId(null);
+    }
+  }
+
   async function handleRunKeywordSet(keywordSet: NewsKeywordSet) {
     if (!selectedCase) {
       return;
@@ -566,6 +614,7 @@ export function CaseDashboard({ initialCases, initialApiOnline }: CaseDashboardP
       </div>
 
       <NewsMonitoringPanel
+        draftScanLoading={scanLoadingId === draftScanLoadingId}
         evidenceLinks={evidenceLinks}
         keywordDraft={keywordDraft}
         keywordSets={keywordSets}
@@ -577,6 +626,7 @@ export function CaseDashboard({ initialCases, initialApiOnline }: CaseDashboardP
         trendSummary={trendSummary}
         onCreateKeywordSet={handleCreateKeywordSet}
         onKeywordDraftChange={setKeywordDraft}
+        onRunDraftScan={() => void handleRunDraftScan()}
         onRunKeywordSet={(keywordSet) => void handleRunKeywordSet(keywordSet)}
         onSaveEvidence={(result) => void handleSaveEvidence(result)}
         onUpdateReviewStatus={(result, reviewStatus) =>

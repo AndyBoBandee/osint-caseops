@@ -13,6 +13,7 @@ import {
 
 type NewsMonitoringPanelProps = {
   evidenceLinks: EvidenceLinkRecord[];
+  draftScanLoading: boolean;
   keywordDraft: KeywordSetFormState;
   keywordSets: NewsKeywordSet[];
   newsLoading: boolean;
@@ -23,6 +24,7 @@ type NewsMonitoringPanelProps = {
   trendSummary: TrendSummary | null;
   onKeywordDraftChange: (draft: KeywordSetFormState) => void;
   onCreateKeywordSet: (event: FormEvent<HTMLFormElement>) => void;
+  onRunDraftScan: () => void;
   onRunKeywordSet: (keywordSet: NewsKeywordSet) => void;
   onSaveEvidence: (result: NewsResultRecord) => void;
   onUpdateReviewStatus: (result: NewsResultRecord, reviewStatus: NewsReviewStatus) => void;
@@ -88,6 +90,7 @@ function visibleTrendGroups(trendSummary: TrendSummary | null): TrendSummary["gr
 
 export function NewsMonitoringPanel({
   evidenceLinks,
+  draftScanLoading,
   keywordDraft,
   keywordSets,
   newsLoading,
@@ -98,6 +101,7 @@ export function NewsMonitoringPanel({
   trendSummary,
   onKeywordDraftChange,
   onCreateKeywordSet,
+  onRunDraftScan,
   onRunKeywordSet,
   onSaveEvidence,
   onUpdateReviewStatus,
@@ -158,9 +162,19 @@ export function NewsMonitoringPanel({
                   }
                 />
               </label>
-              <button className="oc-btn oc-btn-primary" type="submit">
-                Save keyword set
-              </button>
+              <div className="oc-form-footer">
+                <button
+                  className="oc-btn oc-btn-primary"
+                  disabled={scanLoadingId !== null}
+                  onClick={onRunDraftScan}
+                  type="button"
+                >
+                  {draftScanLoading ? "Scanning" : "Run scoped scan"}
+                </button>
+                <button className="oc-btn" type="submit">
+                  Save keyword set
+                </button>
+              </div>
             </form>
 
             <div className="oc-divider" />
@@ -177,7 +191,7 @@ export function NewsMonitoringPanel({
                   </div>
                   <button
                     className="oc-btn oc-btn-primary oc-btn-sm"
-                    disabled={scanLoadingId === keywordSet.id}
+                    disabled={scanLoadingId !== null}
                     onClick={() => onRunKeywordSet(keywordSet)}
                     type="button"
                   >
