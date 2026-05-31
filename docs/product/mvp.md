@@ -1,5 +1,15 @@
 # MVP Definition
 
+## Current Build Slice
+
+The active product slice has been narrowed to a dedicated Fraud Monitor dashboard. The app should
+first prove one workflow well: run on-demand and scheduled public-search jobs for the fixed keyword
+`fraud`, store results locally, show provider/run status, support analyst review, and save source
+links as evidence.
+
+The broader case, entity, relationship, and report workflow below remains product direction, not the
+current first-screen implementation target.
+
 ## MVP Thesis
 
 The MVP should prove that OSINT CaseOps can support one complete, ethical, local-first investigation workflow from case creation to report export.

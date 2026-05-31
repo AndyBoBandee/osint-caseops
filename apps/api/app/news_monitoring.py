@@ -496,20 +496,32 @@ def search_brave(keyword: str, max_results: int) -> list[ProviderResult]:
     return results
 
 
-def search_public_news(keyword: str, max_results: int | None = None) -> list[ProviderResult]:
+def search_public_news_with_provider(
+    keyword: str,
+    provider: str,
+    max_results: int | None = None,
+) -> list[ProviderResult]:
     settings = get_settings()
     limit = max_results or settings.news_search_max_results
-    provider = settings.news_search_provider.lower()
+    normalized_provider = provider.lower()
 
-    if provider == "brave":
+    if normalized_provider == "brave":
         return search_brave(keyword, limit)
-    if provider == "gdelt":
+    if normalized_provider == "gdelt":
         return search_gdelt(keyword, limit)
-    if provider == "google_news_rss":
+    if normalized_provider == "google_news_rss":
         return search_google_news_rss(keyword, limit)
-    if provider == "hn_algolia":
+    if normalized_provider == "hn_algolia":
         return search_hn_algolia(keyword, limit)
-    raise RuntimeError(f"Unsupported news provider: {settings.news_search_provider}.")
+    raise RuntimeError(f"Unsupported news provider: {provider}.")
+
+
+def search_public_news(keyword: str, max_results: int | None = None) -> list[ProviderResult]:
+    return search_public_news_with_provider(
+        keyword,
+        get_settings().news_search_provider,
+        max_results,
+    )
 
 
 def infer_theme(title: str, snippet: str) -> str:

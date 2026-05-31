@@ -12,7 +12,7 @@
 
 - `web`: Next.js frontend.
 - `api`: FastAPI backend.
-- `worker`: lightweight background job process, added in a later milestone.
+- `worker`: not a separate service yet. The current fraud monitor scheduler runs inside the API process.
 - SQLite runs as a local database file mounted into the app data directory, not as a separate service.
 
 ## Root Commands
@@ -33,7 +33,7 @@ make smoke
 - `make test-fast` runs API tests and web lint.
 - `make test` adds the Next production build.
 - `make check` runs repo hygiene, tests, build, audit, and Compose config.
-- `make smoke` starts Docker Compose, verifies API health, SQLite health, and the web-to-API health panel, then shuts Compose down.
+- `make smoke` starts Docker Compose, verifies API health, SQLite health, the Fraud Monitor dashboard, and the schedule API, then shuts Compose down.
 
 Use `make api` or `make web` to run only one service. Use `make docker-up`, `make docker-down`, and `make docker-logs` for direct Compose control.
 
@@ -71,18 +71,29 @@ data/cases/{case_id}/
 - Do not require paid API keys for the default workflow.
 - Make external requests visible in enrichment run logs.
 
-## Public News Monitoring Providers
+## Fraud Monitor Providers
 
-Milestone 4 public news monitoring uses passive HTTP GET requests to public search providers. The
-default no-key provider is Hacker News Algolia (`OSINT_CASEOPS_NEWS_PROVIDER=hn_algolia`) so local
-development and smoke checks can exercise ingestion without a paid key. Optional providers are:
+The current app surface is the Fraud Monitor dashboard. It uses passive HTTP GET requests to public
+search providers for the fixed keyword `fraud`. Default no-key providers are:
 
-- `OSINT_CASEOPS_NEWS_PROVIDER=brave` with `BRAVE_SEARCH_API_KEY` for Brave News Search.
-- `OSINT_CASEOPS_NEWS_PROVIDER=google_news_rss` for Google News RSS search.
-- `OSINT_CASEOPS_NEWS_PROVIDER=gdelt` for the GDELT document API.
+- `gdelt` for the GDELT document API.
+- `google_news_rss` for Google News RSS search.
+- `hn_algolia` for Hacker News Algolia search.
 
-Use `OSINT_CASEOPS_NEWS_MAX_RESULTS` to cap results per keyword. Tests mock provider responses and
-do not require network access or API credentials.
+Configure the dashboard provider list with:
+
+```sh
+OSINT_CASEOPS_FRAUD_MONITOR_PROVIDERS=gdelt,google_news_rss,hn_algolia
+```
+
+Optional providers:
+
+- `brave` with `BRAVE_SEARCH_API_KEY` for Brave News Search.
+
+Use `OSINT_CASEOPS_NEWS_MAX_RESULTS` to cap results per provider. Use
+`OSINT_CASEOPS_FRAUD_MONITOR_SCHEDULER_SECONDS` to tune how often the API checks for due scheduled
+runs. Tests and smoke checks mock or avoid live provider calls and do not require network access or
+API credentials.
 
 ## First Setup Tasks
 

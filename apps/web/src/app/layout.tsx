@@ -3,8 +3,8 @@ import "../styles/osint-caseops.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "OSINT CaseOps",
-  description: "Local-first OSINT case workbench foundation.",
+  title: "Fraud Monitor",
+  description: "Local-first fraud keyword monitoring dashboard.",
   icons: {
     icon: "/icon.svg",
   },

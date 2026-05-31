@@ -7,13 +7,18 @@ from app.cases import router as cases_router
 from app.core.config import get_settings
 from app.db.sqlite import check_database, initialize_database
 from app.enrichment import router as enrichment_router
+from app.fraud_monitor import router as fraud_monitor_router, start_scheduler, stop_scheduler
 from app.news_monitoring import router as news_monitoring_router
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     initialize_database()
-    yield
+    start_scheduler()
+    try:
+        yield
+    finally:
+        await stop_scheduler()
 
 app = FastAPI(
     title="OSINT CaseOps API",
@@ -25,6 +30,7 @@ app = FastAPI(
 app.include_router(cases_router)
 app.include_router(enrichment_router)
 app.include_router(news_monitoring_router)
+app.include_router(fraud_monitor_router)
 
 
 @app.get("/health")

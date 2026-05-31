@@ -158,6 +158,42 @@ def initialize_database() -> None:
                 ON evidence_links(news_result_id);
             CREATE INDEX IF NOT EXISTS idx_evidence_links_case_id
                 ON evidence_links(case_id);
+
+            CREATE TABLE IF NOT EXISTS fraud_monitor_settings (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                case_id TEXT NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+                keyword TEXT NOT NULL CHECK (keyword = 'fraud'),
+                enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)) DEFAULT 0,
+                interval_minutes INTEGER NOT NULL DEFAULT 60,
+                next_run_at TEXT NOT NULL,
+                last_started_at TEXT NOT NULL DEFAULT '',
+                last_completed_at TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS fraud_monitor_jobs (
+                id TEXT PRIMARY KEY,
+                case_id TEXT NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+                keyword TEXT NOT NULL CHECK (keyword = 'fraud'),
+                trigger_type TEXT NOT NULL CHECK (trigger_type IN ('manual', 'scheduled')),
+                status TEXT NOT NULL CHECK (status IN ('success', 'partial', 'failed')),
+                started_at TEXT NOT NULL,
+                completed_at TEXT NOT NULL,
+                provider_count INTEGER NOT NULL DEFAULT 0,
+                result_count INTEGER NOT NULL DEFAULT 0,
+                error_message TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_fraud_monitor_jobs_created_at
+                ON fraud_monitor_jobs(created_at);
+
+            CREATE TABLE IF NOT EXISTS fraud_monitor_job_runs (
+                job_id TEXT NOT NULL REFERENCES fraud_monitor_jobs(id) ON DELETE CASCADE,
+                news_run_id TEXT NOT NULL REFERENCES news_ingestion_runs(id) ON DELETE CASCADE,
+                provider TEXT NOT NULL,
+                PRIMARY KEY (job_id, news_run_id)
+            );
             """
         )
 

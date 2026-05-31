@@ -7,7 +7,7 @@
 - Database: SQLite.
 - Evidence storage: local filesystem.
 - Browser capture: Playwright.
-- Background jobs: lightweight async worker or APScheduler.
+- Background jobs: lightweight API-process scheduler for the current fraud monitor slice; a separate worker can be added when job volume or reliability needs it.
 - Graph UI: React Flow or Cytoscape.js.
 - Local deployment: Docker Compose.
 
@@ -15,7 +15,17 @@
 
 ### Web App
 
-The web app provides the analyst workspace:
+The current web app provides a focused Fraud Monitor dashboard:
+
+- Fixed keyword status for `fraud`.
+- Run-now controls.
+- Cron-style schedule controls.
+- Provider status.
+- Review queue.
+- Job history.
+- Trend groups.
+
+The broader analyst workspace remains product direction:
 
 - Case dashboard.
 - Entity forms.
@@ -29,6 +39,7 @@ The web app provides the analyst workspace:
 
 The API owns application logic:
 
+- Fraud monitor dashboard, job, schedule, review, and evidence wrapper endpoints.
 - Case, entity, evidence, finding, and relationship endpoints.
 - Enrichment orchestration.
 - Report generation.

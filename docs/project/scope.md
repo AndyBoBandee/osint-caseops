@@ -22,6 +22,10 @@ Core capabilities:
 
 ## MVP Scope
 
+The current implementation slice is intentionally smaller than the broader MVP: a standalone Fraud
+Monitor dashboard for on-demand and scheduled public-search jobs against the single fixed keyword
+`fraud`. It should feel like an app surface, not a website or full investigation suite.
+
 The MVP should prove one strong workflow: domain and URL investigation for scam, vendor, brand, and small-business exposure review. It should not overpromise as an all-purpose investigation platform.
 
 MVP entity types:

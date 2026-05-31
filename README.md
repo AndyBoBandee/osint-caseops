@@ -1,20 +1,21 @@
-# OSINT CaseOps
+# Fraud Monitor
 
-Turn public data into defensible intelligence.
+A local-first dashboard for monitoring public results about one keyword: `fraud`.
 
-OSINT CaseOps is a local-first, open-source workbench for ethical public-source research. It helps users create scoped cases, track entities, preserve evidence, rate confidence, map relationships, monitor changes, and export reports.
+This repository is being narrowed back to a focused app foundation. The current product surface is a dashboard that can run on-demand and scheduled public-search jobs for the fixed keyword `fraud`, store results locally in SQLite, and let an analyst review or save source links as evidence.
 
 ## What It Does
 
-- Organizes public-source research around cases, scope, and objectives.
-- Tracks entities such as domains, URLs, email addresses, IP addresses, and organizations.
-- Preserves evidence with source links, timestamps, notes, screenshots, and hashes.
-- Turns raw enrichment into confidence-rated findings and reports.
+- Runs one fixed keyword monitor for `fraud`.
+- Supports manual runs and a local cron-style scheduler while the API process is running.
+- Uses no-key providers by default: GDELT, Google News RSS, and Hacker News Algolia.
+- Supports optional Brave News Search when `BRAVE_SEARCH_API_KEY` is configured.
+- Stores runs, results, review status, trend groups, and evidence links in local SQLite.
 - Runs locally by default with FastAPI, Next.js, SQLite, and Docker Compose.
 
 ## Why It Exists
 
-Many OSINT tools collect data, but fewer help users verify, preserve, explain, and report what they found. OSINT CaseOps focuses on structured, ethical, evidence-first work rather than raw data dumping.
+The broader OSINT CaseOps idea is still useful, but the app now starts from one concrete workflow: monitor public fraud reporting, make every provider run visible, and keep the review queue local and understandable.
 
 ## Responsible Use
 
@@ -43,7 +44,7 @@ make check
 make smoke
 ```
 
-`make dev` runs the API at `http://127.0.0.1:8000` and the web app at `http://127.0.0.1:3000`. `make smoke` runs the Docker Compose stack, verifies API, SQLite, and web-to-API health, then shuts the stack down.
+`make dev` runs the API at `http://127.0.0.1:8000` and the web app at `http://127.0.0.1:3000`. `make smoke` runs the Docker Compose stack, verifies API, SQLite, the Fraud Monitor dashboard, and the schedule API without making live provider calls, then shuts the stack down.
 
 ## Project Layout
 
@@ -57,12 +58,10 @@ make smoke
 
 ## Example Workflows
 
-- Domain and URL investigation.
-- Scam and fraud review.
-- Small-business exposure review.
-- Vendor risk snapshot.
-- Brand monitoring.
-- Personal digital footprint audit.
+- Run an on-demand `fraud` search across configured public providers.
+- Enable or disable local scheduled `fraud` scans.
+- Review stored public results and mark them pending, relevant, or not relevant.
+- Save source links as evidence records for later analysis.
 
 ## Documentation
 
@@ -77,7 +76,7 @@ Start with:
 
 ## Contributing
 
-Contributions are welcome around case workflows, evidence handling, enrichment modules, reporting, accessibility, tests, and documentation. Features that enable harassment, doxxing, credential harvesting, unauthorized access, or invasive profiling will not be accepted.
+Contributions are welcome around provider adapters, scheduler reliability, evidence handling, accessibility, tests, and documentation. Features that enable harassment, doxxing, credential harvesting, unauthorized access, or invasive profiling will not be accepted.
 
 ## Roadmap
 
