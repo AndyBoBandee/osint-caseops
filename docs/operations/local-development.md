@@ -95,6 +95,27 @@ Use `OSINT_CASEOPS_NEWS_MAX_RESULTS` to cap results per provider. Use
 runs. Tests and smoke checks mock or avoid live provider calls and do not require network access or
 API credentials.
 
+For deterministic local smoke checks, use the test-only fixture provider:
+
+```sh
+OSINT_CASEOPS_ENABLE_FIXTURE_PROVIDER=1
+OSINT_CASEOPS_FRAUD_MONITOR_PROVIDERS=fixture
+```
+
+The `fixture` provider is unsupported unless explicitly enabled. It returns local deterministic
+public-source-style records and never makes external requests.
+
+Fraud Monitor runs one job at a time. Manual overlap returns `409 Conflict`; scheduled overlap is
+skipped and retried on the next scheduler tick without advancing `next_run_at`.
+
+## Provider Behavior And Safety Limits
+
+- Provider calls must stay passive HTTP GET requests.
+- Default local development must not require paid API keys.
+- New providers must document external requests, rate limits, and responsible-use constraints before implementation.
+- Provider failures should be displayed as concise actionable messages with provider attribution.
+- Public results are leads for analyst review, not automated fraud verdicts.
+
 ## First Setup Tasks
 
 1. Keep `apps/web` and `apps/api` runnable from their own directories.

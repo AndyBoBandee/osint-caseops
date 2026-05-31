@@ -125,6 +125,8 @@ def initialize_database() -> None:
                 ) DEFAULT 'pending',
                 saved_as_evidence INTEGER NOT NULL CHECK (saved_as_evidence IN (0, 1)) DEFAULT 0,
                 evidence_link_id TEXT,
+                seen_count INTEGER NOT NULL DEFAULT 1,
+                last_seen_at TEXT NOT NULL DEFAULT '',
                 theme TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL,
                 UNIQUE(case_id, source_url, keyword)
@@ -196,6 +198,32 @@ def initialize_database() -> None:
             );
             """
         )
+        ensure_column(
+            connection,
+            "news_results",
+            "seen_count",
+            "INTEGER NOT NULL DEFAULT 1",
+        )
+        ensure_column(
+            connection,
+            "news_results",
+            "last_seen_at",
+            "TEXT NOT NULL DEFAULT ''",
+        )
+
+
+def ensure_column(
+    connection: sqlite3.Connection,
+    table_name: str,
+    column_name: str,
+    definition: str,
+) -> None:
+    columns = {
+        row[1]
+        for row in connection.execute(f"PRAGMA table_info({table_name})").fetchall()
+    }
+    if column_name not in columns:
+        connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
 
 
 def check_database() -> dict[str, str]:

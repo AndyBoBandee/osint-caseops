@@ -4,7 +4,9 @@ services:
     working_dir: /workspace/apps/api
     command: uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
     environment:
-      OSINT_CASEOPS_DATA_DIR: /workspace/data
+      OSINT_CASEOPS_DATA_DIR: ${OSINT_CASEOPS_DATA_DIR:-/workspace/data}
+      OSINT_CASEOPS_ENABLE_FIXTURE_PROVIDER: ${OSINT_CASEOPS_ENABLE_FIXTURE_PROVIDER:-}
+      OSINT_CASEOPS_FRAUD_MONITOR_PROVIDERS: ${OSINT_CASEOPS_FRAUD_MONITOR_PROVIDERS:-gdelt,google_news_rss,hn_algolia}
       UV_LINK_MODE: copy
       UV_PROJECT_ENVIRONMENT: /workspace/apps/api/.venv-docker
     ports:

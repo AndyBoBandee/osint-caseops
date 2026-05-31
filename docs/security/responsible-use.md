@@ -2,21 +2,20 @@
 
 ## Purpose
 
-OSINT CaseOps is intended for lawful, ethical, public-source research. It should help users organize, preserve, interpret, and report public information without encouraging harassment, unauthorized access, or invasive profiling.
+Fraud Monitor is intended for lawful, ethical, passive public-source research. It should help users monitor public fraud reporting, review source context, and preserve useful links without encouraging harassment, unauthorized access, or invasive profiling.
 
 ## Public Ethics Statement
 
-OSINT CaseOps is built for lawful public-source research. The project prioritizes scope, evidence, confidence, and responsible reporting. It is not designed for stalking, harassment, doxxing, credential harvesting, or unauthorized access.
+Fraud Monitor is built for lawful public-source research. The project prioritizes source attribution, analyst review, evidence, and responsible reporting. It is not designed for stalking, harassment, doxxing, credential harvesting, or unauthorized access.
 
 ## Allowed Use Cases
 
 Appropriate uses include:
 
-- Reviewing your own public digital footprint.
-- Reviewing domains and systems you own or administer.
 - Investigating suspicious scams or fraud attempts using public information.
-- Conducting authorized security research.
-- Reviewing vendor or brand public exposure.
+- Monitoring public fraud reporting for analyst review.
+- Reviewing public trend context around fraud-related sources.
+- Saving public source links as evidence with analyst notes.
 - Performing public-interest research with appropriate care.
 
 ## Prohibited Use Cases
@@ -51,10 +50,10 @@ Users are responsible for:
 
 The product should:
 
-- Require scope selection before investigation.
+- Keep the workflow passive by default.
 - Display responsible-use warnings in risky workflows.
 - Keep invasive modules disabled or absent.
-- Preserve source context in reports.
+- Preserve source context in evidence records.
 - Avoid presenting uncertain associations as facts.
-- Make confidence and evidence visible.
+- Make review status and evidence visible.
 - Make limitations visible in reports and user-facing warnings.

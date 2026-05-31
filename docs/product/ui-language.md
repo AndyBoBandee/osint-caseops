@@ -2,39 +2,40 @@
 
 ## Voice
 
-App UI should be short, calm, and plainspoken. Prefer labels that describe the user action directly and reinforce lawful, scoped public-source research.
+App UI should be short, calm, and plainspoken. Prefer labels that describe the user action directly and reinforce lawful, passive public-source research.
 
 ## Preferred Actions
 
 Use these labels for primary workflows:
 
-- Create case
-- Add entity
-- Run enrichment
-- Capture evidence
-- Add finding
-- Export report
-- Review scope
+- Run now
+- Running
+- Refresh
+- Review queue
+- Save evidence
+- Provider status
+- Job history
+- Trend groups
+- Mark relevant
+- Mark not relevant
+- Analyst note
 - Save note
 - View source
-- Open timeline
-- Add relationship
 
 ## Empty States
 
 Use empty states that tell users what to do next:
 
-- No cases: "Create your first case to begin organizing public-source research."
-- No entities: "Add a domain, URL, email address, organization, or IP address to start this case."
-- No evidence: "Capture a source, screenshot, or note to support your findings."
-- No findings: "Findings will appear here after enrichment runs or manual review."
-- No relationships: "Relationships will appear when entities are connected by evidence or enrichment results."
+- No results: "No fraud results are stored yet."
+- No trend groups: "Run a scan to build fraud trend groups."
+- No jobs: "No fraud jobs have run yet."
+- No evidence: "Save a source link as evidence after analyst review."
 
 ## Warning Messages
 
 Warnings should be firm without sounding dramatic:
 
-- Scope warning: "OSINT CaseOps is designed for lawful, ethical, public-source research. Define your scope before collecting information."
+- Scope warning: "Fraud Monitor is designed for lawful, ethical, passive public-source research. Review sources before treating results as evidence."
 - Private-individual warning: "Research involving private individuals can create legal, ethical, and safety risks. Continue only if you have a legitimate purpose and are working with public information."
 - Unauthorized-scanning warning: "Do not run active checks against systems you do not own or have permission to assess."
 - Evidence-limitation warning: "This finding is based on limited public data. Treat it as a lead, not a conclusion."

@@ -2,6 +2,15 @@ export type ProviderStatus = "ready" | "needs_key" | "unsupported";
 export type NewsReviewStatus = "pending" | "relevant" | "not_relevant";
 export type NewsRunStatus = "success" | "partial" | "failed";
 export type TrendGroupType = "keyword" | "source" | "time_window" | "theme";
+export type EvidenceFilter = "all" | "saved" | "unsaved";
+export type ResultSort =
+  | "retrieved_desc"
+  | "retrieved_asc"
+  | "published_desc"
+  | "published_asc"
+  | "title_asc"
+  | "source_asc"
+  | "review_asc";
 
 export type ProviderInfo = {
   name: string;
@@ -16,6 +25,13 @@ export type FraudMonitorSchedule = {
   last_started_at: string;
   last_completed_at: string;
   updated_at: string;
+};
+
+export type FraudMonitorRuntime = {
+  is_running: boolean;
+  ready_provider_count: number;
+  last_error_message: string;
+  last_error_at: string;
 };
 
 export type FraudMonitorJob = {
@@ -36,6 +52,7 @@ export type NewsResultRecord = {
   id: string;
   case_id: string;
   run_id: string;
+  provider: string;
   keyword: string;
   source_url: string;
   publisher: string;
@@ -46,8 +63,24 @@ export type NewsResultRecord = {
   review_status: NewsReviewStatus;
   saved_as_evidence: boolean;
   evidence_link_id: string | null;
+  evidence_analyst_note: string;
+  seen_count: number;
+  duplicate_count: number;
   theme: string;
   created_at: string;
+};
+
+export type FraudMonitorResultPage = {
+  total_matching: number;
+  limit: number;
+  offset: number;
+  has_next: boolean;
+  has_previous: boolean;
+  search: string;
+  sort: ResultSort;
+  review_filter: NewsReviewStatus | "all";
+  provider_filter: string;
+  evidence_filter: EvidenceFilter;
 };
 
 export type TrendGroup = {
@@ -73,7 +106,9 @@ export type FraudMonitorDashboardData = {
   latest_job: FraudMonitorJob | null;
   jobs: FraudMonitorJob[];
   results: NewsResultRecord[];
+  result_page: FraudMonitorResultPage;
   evidence_count: number;
+  runtime: FraudMonitorRuntime;
   trend_summary: TrendSummary;
   total_results: number;
   pending_results: number;

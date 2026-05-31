@@ -21,9 +21,9 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         await stop_scheduler()
 
 app = FastAPI(
-    title="OSINT CaseOps API",
+    title="Fraud Monitor API",
     version="0.1.0",
-    summary="Local-first API for scoped OSINT case operations.",
+    summary="Local-first API for passive public fraud monitoring.",
     lifespan=lifespan,
 )
 

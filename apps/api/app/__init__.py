@@ -1,1 +1,1 @@
-"""OSINT CaseOps API package."""
+"""Fraud Monitor API package."""

@@ -4,11 +4,13 @@ import { useMemo, useState } from "react";
 
 import { apiRequest } from "./case-api";
 import {
+  EvidenceFilter,
   FraudMonitorDashboardData,
   FraudMonitorJob,
   NewsResultRecord,
   NewsReviewStatus,
   ProviderInfo,
+  ResultSort,
   TrendGroup,
 } from "./fraud-monitor-types";
 
@@ -20,6 +22,17 @@ type FraudMonitorDashboardProps = {
 type SchedulePatch = {
   enabled?: boolean;
   interval_minutes?: number;
+};
+
+type ReviewFilter = "all" | NewsReviewStatus;
+type ResultQuery = {
+  search: string;
+  review: ReviewFilter;
+  provider: string;
+  evidence: EvidenceFilter;
+  sort: ResultSort;
+  limit: number;
+  offset: number;
 };
 
 function statusClass(status: string) {
@@ -52,6 +65,9 @@ function providerLabel(provider: string) {
   if (provider === "hn_algolia") {
     return "HN Algolia";
   }
+  if (provider === "fixture") {
+    return "Fixture";
+  }
   if (provider === "brave") {
     return "Brave";
   }
@@ -62,13 +78,81 @@ function trendLabel(group: TrendGroup) {
   return `${group.group_type.replaceAll("_", " ")}: ${group.label}`;
 }
 
+function sortLabel(sort: ResultSort) {
+  if (sort === "retrieved_asc") {
+    return "Retrieved oldest";
+  }
+  if (sort === "published_desc") {
+    return "Published newest";
+  }
+  if (sort === "published_asc") {
+    return "Published oldest";
+  }
+  if (sort === "title_asc") {
+    return "Title A-Z";
+  }
+  if (sort === "source_asc") {
+    return "Source A-Z";
+  }
+  if (sort === "review_asc") {
+    return "Review status";
+  }
+  return "Retrieved newest";
+}
+
+function makeInitialQuery(dashboard: FraudMonitorDashboardData): ResultQuery {
+  return {
+    search: dashboard.result_page.search,
+    review: dashboard.result_page.review_filter,
+    provider: dashboard.result_page.provider_filter,
+    evidence: dashboard.result_page.evidence_filter,
+    sort: dashboard.result_page.sort,
+    limit: dashboard.result_page.limit,
+    offset: dashboard.result_page.offset,
+  };
+}
+
+function dashboardPath(query: ResultQuery) {
+  const params = new URLSearchParams();
+  if (query.search.trim()) {
+    params.set("search", query.search.trim());
+  }
+  if (query.review !== "all") {
+    params.set("review", query.review);
+  }
+  if (query.provider !== "all") {
+    params.set("provider", query.provider);
+  }
+  if (query.evidence !== "all") {
+    params.set("evidence", query.evidence);
+  }
+  params.set("sort", query.sort);
+  params.set("limit", String(query.limit));
+  params.set("offset", String(query.offset));
+  return `/fraud-monitor/dashboard?${params.toString()}`;
+}
+
 export function FraudMonitorDashboard({
   initialDashboard,
   initialApiOnline,
 }: FraudMonitorDashboardProps) {
   const [dashboard, setDashboard] = useState(initialDashboard);
+  const [resultQuery, setResultQuery] = useState<ResultQuery>(() => makeInitialQuery(initialDashboard));
   const [isRunning, setIsRunning] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSavingSchedule, setIsSavingSchedule] = useState(false);
+  const [apiOnline, setApiOnline] = useState(initialApiOnline);
+  const [reviewFilter, setReviewFilter] = useState<ReviewFilter>(initialDashboard.result_page.review_filter);
+  const [providerFilter, setProviderFilter] = useState(initialDashboard.result_page.provider_filter);
+  const [evidenceFilter, setEvidenceFilter] = useState<EvidenceFilter>(
+    initialDashboard.result_page.evidence_filter,
+  );
+  const [searchDraft, setSearchDraft] = useState(initialDashboard.result_page.search);
+  const [resultSort, setResultSort] = useState<ResultSort>(initialDashboard.result_page.sort);
+  const [resultLimit, setResultLimit] = useState(initialDashboard.result_page.limit);
+  const [evidenceNotes, setEvidenceNotes] = useState<Record<string, string>>({});
+  const [selectedResultIds, setSelectedResultIds] = useState<string[]>([]);
+  const [bulkReviewStatus, setBulkReviewStatus] = useState<NewsReviewStatus>("relevant");
   const [intervalDraft, setIntervalDraft] = useState(
     String(initialDashboard.schedule.interval_minutes),
   );
@@ -79,11 +163,55 @@ export function FraudMonitorDashboard({
     () => dashboard.trend_summary.groups.slice(0, 6),
     [dashboard.trend_summary.groups],
   );
+  const resultProviders = useMemo(() => {
+    return Array.from(
+      new Set([
+        ...dashboard.providers.map((provider) => provider.name),
+        ...dashboard.results.map((result) => result.provider).filter(Boolean),
+      ]),
+    ).sort();
+  }, [dashboard.providers, dashboard.results]);
+  const visibleResultIds = useMemo(() => dashboard.results.map((result) => result.id), [dashboard.results]);
+  const selectedVisibleCount = selectedResultIds.filter((id) => visibleResultIds.includes(id)).length;
+  const runDisabled = isRunning || dashboard.runtime.is_running || dashboard.runtime.ready_provider_count === 0;
 
-  async function refreshDashboard() {
-    const nextDashboard = await apiRequest<FraudMonitorDashboardData>("/fraud-monitor/dashboard");
+  async function refreshDashboard(nextQuery: ResultQuery = resultQuery) {
+    const nextDashboard = await apiRequest<FraudMonitorDashboardData>(dashboardPath(nextQuery));
     setDashboard(nextDashboard);
+    const syncedQuery = makeInitialQuery(nextDashboard);
+    setResultQuery(syncedQuery);
+    setSearchDraft(syncedQuery.search);
+    setReviewFilter(syncedQuery.review);
+    setProviderFilter(syncedQuery.provider);
+    setEvidenceFilter(syncedQuery.evidence);
+    setResultSort(syncedQuery.sort);
+    setResultLimit(syncedQuery.limit);
     setIntervalDraft(String(nextDashboard.schedule.interval_minutes));
+    setSelectedResultIds((current) => current.filter((id) => nextDashboard.results.some((result) => result.id === id)));
+    setApiOnline(true);
+    setError("");
+  }
+
+  function getRequestError(caught: unknown, fallback: string) {
+    const message = caught instanceof Error ? caught.message : fallback;
+    if (message.startsWith("500 ") || message.toLowerCase().includes("failed to fetch")) {
+      setApiOnline(false);
+    }
+    return message;
+  }
+
+  async function handleRefresh() {
+    setIsRefreshing(true);
+    setNotice("");
+    setError("");
+    try {
+      await refreshDashboard();
+      setNotice("Dashboard refreshed.");
+    } catch (caught) {
+      setError(getRequestError(caught, "Could not refresh dashboard."));
+    } finally {
+      setIsRefreshing(false);
+    }
   }
 
   async function runNow() {
@@ -99,7 +227,7 @@ export function FraudMonitorDashboard({
           : `Fraud scan finished with ${job.status} status.`,
       );
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not run fraud scan.");
+      setError(getRequestError(caught, "Could not run fraud scan."));
     } finally {
       setIsRunning(false);
     }
@@ -117,7 +245,7 @@ export function FraudMonitorDashboard({
       await refreshDashboard();
       setNotice("Schedule updated.");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not update schedule.");
+      setError(getRequestError(caught, "Could not update schedule."));
     } finally {
       setIsSavingSchedule(false);
     }
@@ -144,7 +272,85 @@ export function FraudMonitorDashboard({
       await refreshDashboard();
       setNotice("Review status updated.");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not update review status.");
+      setError(getRequestError(caught, "Could not update review status."));
+    }
+  }
+
+  async function applyResultControls() {
+    const nextQuery: ResultQuery = {
+      search: searchDraft,
+      review: reviewFilter,
+      provider: providerFilter,
+      evidence: evidenceFilter,
+      sort: resultSort,
+      limit: resultLimit,
+      offset: 0,
+    };
+    setIsRefreshing(true);
+    setNotice("");
+    setError("");
+    try {
+      setResultQuery(nextQuery);
+      await refreshDashboard(nextQuery);
+      setNotice("Review queue updated.");
+    } catch (caught) {
+      setError(getRequestError(caught, "Could not update review queue."));
+    } finally {
+      setIsRefreshing(false);
+    }
+  }
+
+  async function goToResultPage(offset: number) {
+    const nextQuery = { ...resultQuery, offset };
+    setIsRefreshing(true);
+    setNotice("");
+    setError("");
+    try {
+      setResultQuery(nextQuery);
+      await refreshDashboard(nextQuery);
+    } catch (caught) {
+      setError(getRequestError(caught, "Could not load result page."));
+    } finally {
+      setIsRefreshing(false);
+    }
+  }
+
+  function toggleResultSelection(resultId: string) {
+    setSelectedResultIds((current) =>
+      current.includes(resultId)
+        ? current.filter((id) => id !== resultId)
+        : [...current, resultId],
+    );
+  }
+
+  function togglePageSelection(checked: boolean) {
+    setSelectedResultIds((current) => {
+      if (!checked) {
+        return current.filter((id) => !visibleResultIds.includes(id));
+      }
+      return Array.from(new Set([...current, ...visibleResultIds]));
+    });
+  }
+
+  async function applyBulkReview() {
+    if (selectedResultIds.length === 0) {
+      return;
+    }
+    setNotice("");
+    setError("");
+    try {
+      const response = await apiRequest<{ updated_count: number }>("/fraud-monitor/review-batches", {
+        method: "PATCH",
+        body: JSON.stringify({
+          result_ids: selectedResultIds,
+          review_status: bulkReviewStatus,
+        }),
+      });
+      await refreshDashboard();
+      setSelectedResultIds([]);
+      setNotice(`Updated ${response.updated_count} selected result(s).`);
+    } catch (caught) {
+      setError(getRequestError(caught, "Could not update selected results."));
     }
   }
 
@@ -154,12 +360,37 @@ export function FraudMonitorDashboard({
     try {
       await apiRequest(`/fraud-monitor/results/${result.id}/evidence-links`, {
         method: "POST",
-        body: JSON.stringify({ analyst_note: "Saved from the fraud monitor review queue." }),
+        body: JSON.stringify({ analyst_note: evidenceNotes[result.id] ?? "" }),
       });
       await refreshDashboard();
+      setEvidenceNotes((current) => {
+        const nextNotes = { ...current };
+        delete nextNotes[result.id];
+        return nextNotes;
+      });
       setNotice("Evidence link saved.");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not save evidence link.");
+      setError(getRequestError(caught, "Could not save evidence link."));
+    }
+  }
+
+  async function updateEvidenceNote(result: NewsResultRecord) {
+    if (!result.evidence_link_id) {
+      return;
+    }
+    setNotice("");
+    setError("");
+    try {
+      await apiRequest(`/fraud-monitor/evidence-links/${result.evidence_link_id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          analyst_note: evidenceNotes[result.id] ?? result.evidence_analyst_note,
+        }),
+      });
+      await refreshDashboard();
+      setNotice("Evidence note updated.");
+    } catch (caught) {
+      setError(getRequestError(caught, "Could not update evidence note."));
     }
   }
 
@@ -181,8 +412,8 @@ export function FraudMonitorDashboard({
             Jobs
           </a>
         </nav>
-        <div className={initialApiOnline ? "oc-badge oc-badge-success" : "oc-badge oc-badge-danger"}>
-          API {initialApiOnline ? "online" : "unavailable"}
+        <div className={apiOnline ? "oc-badge oc-badge-success" : "oc-badge oc-badge-danger"}>
+          API {apiOnline ? "online" : "unavailable"}
         </div>
       </aside>
 
@@ -193,11 +424,11 @@ export function FraudMonitorDashboard({
             <h1>fraud</h1>
           </div>
           <div className="fm-header-actions">
-            <button className="oc-btn oc-btn-primary" disabled={isRunning} onClick={runNow} type="button">
-              {isRunning ? "Running" : "Run now"}
+            <button className="oc-btn oc-btn-primary" disabled={runDisabled} onClick={runNow} type="button">
+              {isRunning || dashboard.runtime.is_running ? "Running" : "Run now"}
             </button>
-            <button className="oc-btn" onClick={() => void refreshDashboard()} type="button">
-              Refresh
+            <button className="oc-btn" disabled={isRefreshing} onClick={() => void handleRefresh()} type="button">
+              {isRefreshing ? "Refreshing" : "Refresh"}
             </button>
           </div>
         </header>
@@ -226,13 +457,30 @@ export function FraudMonitorDashboard({
               ) : null}
             </div>
             <div className="oc-definition-list">
+              <Definition
+                label="Run state"
+                value={dashboard.runtime.is_running ? "Running" : "Idle"}
+              />
               <Definition label="Last run" value={compactDate(dashboard.schedule.last_completed_at)} />
               <Definition label="Next cron run" value={compactDate(dashboard.schedule.next_run_at)} />
               <Definition
                 label="Interval"
                 value={`${dashboard.schedule.interval_minutes} minutes`}
               />
+              <Definition
+                label="Ready providers"
+                value={`${dashboard.runtime.ready_provider_count} provider(s)`}
+              />
             </div>
+            {dashboard.runtime.ready_provider_count === 0 ? (
+              <p className="oc-empty-state">No ready providers are configured.</p>
+            ) : null}
+            {dashboard.runtime.last_error_message ? (
+              <p className="oc-empty-state">
+                Last provider issue: {dashboard.runtime.last_error_message}
+                {dashboard.runtime.last_error_at ? ` (${compactDate(dashboard.runtime.last_error_at)})` : ""}
+              </p>
+            ) : null}
             <div className="fm-schedule-row">
               <label className="oc-check-row">
                 <input
@@ -304,18 +552,154 @@ export function FraudMonitorDashboard({
           <div className="oc-card-header">
             <div>
               <h2 className="oc-card-title">Review queue</h2>
-              <p className="oc-card-description">{dashboard.results.length} recent stored result(s)</p>
+              <p className="oc-card-description">
+                {dashboard.result_page.total_matching} matching result(s), {dashboard.total_results} stored
+              </p>
             </div>
+            <span className="oc-badge oc-badge-info">{sortLabel(dashboard.result_page.sort)}</span>
+          </div>
+          <div className="fm-filter-row" aria-label="Review queue filters">
+            <label className="oc-field fm-search-field">
+              <span className="oc-label">Search</span>
+              <input
+                className="oc-input"
+                onChange={(event) => setSearchDraft(event.target.value)}
+                placeholder="Title, source, URL, theme"
+                value={searchDraft}
+              />
+            </label>
+            <label className="oc-field">
+              <span className="oc-label">Review</span>
+              <select
+                className="oc-input"
+                onChange={(event) => setReviewFilter(event.target.value as ReviewFilter)}
+                value={reviewFilter}
+              >
+                <option value="all">All reviews</option>
+                <option value="pending">Pending</option>
+                <option value="relevant">Relevant</option>
+                <option value="not_relevant">Not relevant</option>
+              </select>
+            </label>
+            <label className="oc-field">
+              <span className="oc-label">Provider</span>
+              <select
+                className="oc-input"
+                onChange={(event) => setProviderFilter(event.target.value)}
+                value={providerFilter}
+              >
+                <option value="all">All providers</option>
+                {resultProviders.map((provider) => (
+                  <option key={provider} value={provider}>
+                    {providerLabel(provider)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="oc-field">
+              <span className="oc-label">Evidence</span>
+              <select
+                className="oc-input"
+                onChange={(event) => setEvidenceFilter(event.target.value as EvidenceFilter)}
+                value={evidenceFilter}
+              >
+                <option value="all">All evidence states</option>
+                <option value="saved">Saved evidence</option>
+                <option value="unsaved">Unsaved</option>
+              </select>
+            </label>
+            <label className="oc-field">
+              <span className="oc-label">Sort</span>
+              <select
+                className="oc-input"
+                onChange={(event) => setResultSort(event.target.value as ResultSort)}
+                value={resultSort}
+              >
+                <option value="retrieved_desc">Retrieved newest</option>
+                <option value="retrieved_asc">Retrieved oldest</option>
+                <option value="published_desc">Published newest</option>
+                <option value="published_asc">Published oldest</option>
+                <option value="title_asc">Title A-Z</option>
+                <option value="source_asc">Source A-Z</option>
+                <option value="review_asc">Review status</option>
+              </select>
+            </label>
+            <label className="oc-field fm-limit-field">
+              <span className="oc-label">Page size</span>
+              <select
+                className="oc-input"
+                onChange={(event) => setResultLimit(Number(event.target.value))}
+                value={resultLimit}
+              >
+                <option value={10}>10</option>
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+              </select>
+            </label>
+            <button className="oc-btn" disabled={isRefreshing} onClick={() => void applyResultControls()} type="button">
+              Apply
+            </button>
+          </div>
+
+          <div className="fm-bulk-row" aria-label="Bulk review controls">
+            <label className="oc-check-row">
+              <input
+                checked={visibleResultIds.length > 0 && selectedVisibleCount === visibleResultIds.length}
+                disabled={visibleResultIds.length === 0}
+                onChange={(event) => togglePageSelection(event.target.checked)}
+                type="checkbox"
+              />
+              Select page
+            </label>
+            <label className="oc-field fm-bulk-status">
+              <span className="oc-label">Set selected to</span>
+              <select
+                className="oc-input"
+                onChange={(event) => setBulkReviewStatus(event.target.value as NewsReviewStatus)}
+                value={bulkReviewStatus}
+              >
+                <option value="relevant">Relevant</option>
+                <option value="not_relevant">Not relevant</option>
+                <option value="pending">Pending</option>
+              </select>
+            </label>
+            <button
+              className="oc-btn oc-btn-primary"
+              disabled={selectedResultIds.length === 0}
+              onClick={() => void applyBulkReview()}
+              type="button"
+            >
+              Apply to {selectedResultIds.length} selected
+            </button>
           </div>
           <div className="fm-result-list">
-            {dashboard.results.length === 0 ? (
+            {dashboard.total_results === 0 ? (
               <p className="oc-empty-state">No fraud results are stored yet.</p>
+            ) : null}
+            {dashboard.total_results > 0 && dashboard.results.length === 0 ? (
+              <p className="oc-empty-state">No results match the current filters.</p>
             ) : null}
             {dashboard.results.map((result) => (
               <article className="oc-panel fm-result" key={result.id}>
                 <div className="fm-result-header">
+                  <label className="fm-select-result" aria-label={`Select ${result.title || result.source_url}`}>
+                    <input
+                      checked={selectedResultIds.includes(result.id)}
+                      onChange={() => toggleResultSelection(result.id)}
+                      type="checkbox"
+                    />
+                  </label>
                   <div>
-                    <span className="oc-badge oc-badge-muted">{result.publisher || "Unknown source"}</span>
+                    <div className="fm-result-badges">
+                      <span className="oc-badge oc-badge-muted">{result.publisher || "Unknown source"}</span>
+                      <span className={result.saved_as_evidence ? "oc-badge oc-badge-success" : "oc-badge oc-badge-muted"}>
+                        {result.saved_as_evidence ? "Evidence saved" : "Unsaved"}
+                      </span>
+                      {result.duplicate_count > 0 ? (
+                        <span className="oc-badge oc-badge-medium">Seen {result.seen_count} times</span>
+                      ) : null}
+                    </div>
                     <h3>{result.title || result.source_url}</h3>
                   </div>
                   <span className={statusClass(result.review_status)}>
@@ -325,12 +709,18 @@ export function FraudMonitorDashboard({
                 <p>{result.snippet || "No snippet returned by the provider."}</p>
                 <div className="oc-case-meta">
                   <span>Published {result.published_at || "unknown"}</span>
+                  <span>Provider {result.provider ? providerLabel(result.provider) : "unknown"}</span>
                   <span>Retrieved {compactDate(result.retrieved_at)}</span>
                   <span>Theme {result.theme || "uncategorized"}</span>
                 </div>
-                <a className="oc-technical" href={result.source_url} rel="noreferrer" target="_blank">
-                  {result.source_url}
-                </a>
+                <div className="fm-source-row">
+                  <a className="oc-technical" href={result.source_url} rel="noreferrer noopener" target="_blank">
+                    {result.source_url}
+                  </a>
+                  <a className="oc-btn oc-btn-sm" href={result.source_url} rel="noreferrer noopener" target="_blank">
+                    Open source
+                  </a>
+                </div>
                 <div className="oc-row-actions">
                   {(["pending", "relevant", "not_relevant"] as NewsReviewStatus[]).map((status) => (
                     <button
@@ -352,8 +742,53 @@ export function FraudMonitorDashboard({
                     {result.saved_as_evidence ? "Saved" : "Save evidence"}
                   </button>
                 </div>
+                <div className="fm-note-row">
+                  <label className="oc-field">
+                    <span className="oc-label">
+                      {result.saved_as_evidence ? "Saved evidence note" : "Analyst note"}
+                    </span>
+                    <textarea
+                      className="oc-input fm-note-input"
+                      onChange={(event) =>
+                        setEvidenceNotes((current) => ({
+                          ...current,
+                          [result.id]: event.target.value,
+                        }))
+                      }
+                      placeholder={result.saved_as_evidence ? "Update saved context" : "Add context before saving evidence"}
+                      value={evidenceNotes[result.id] ?? result.evidence_analyst_note}
+                    />
+                  </label>
+                  {result.saved_as_evidence ? (
+                    <button className="oc-btn oc-btn-sm" onClick={() => void updateEvidenceNote(result)} type="button">
+                      Update note
+                    </button>
+                  ) : null}
+                </div>
               </article>
             ))}
+          </div>
+          <div className="fm-pagination-row">
+            <button
+              className="oc-btn"
+              disabled={!dashboard.result_page.has_previous || isRefreshing}
+              onClick={() => void goToResultPage(Math.max(0, dashboard.result_page.offset - dashboard.result_page.limit))}
+              type="button"
+            >
+              Previous
+            </button>
+            <span>
+              Showing {dashboard.result_page.total_matching === 0 ? 0 : dashboard.result_page.offset + 1}-
+              {Math.min(dashboard.result_page.offset + dashboard.result_page.limit, dashboard.result_page.total_matching)}
+            </span>
+            <button
+              className="oc-btn"
+              disabled={!dashboard.result_page.has_next || isRefreshing}
+              onClick={() => void goToResultPage(dashboard.result_page.offset + dashboard.result_page.limit)}
+              type="button"
+            >
+              Next
+            </button>
           </div>
         </section>
 

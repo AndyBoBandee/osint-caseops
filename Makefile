@@ -7,7 +7,7 @@ DOCKER_DIR := infra/docker
 .PHONY: help bootstrap dev api web test-fast test check smoke docker-up docker-down docker-logs
 
 help:
-	@printf "OSINT CaseOps commands\n\n"
+	@printf "Fraud Monitor commands\n\n"
 	@printf "  make bootstrap    Install API and web dependencies\n"
 	@printf "  make dev          Start API reload and Next dev together\n"
 	@printf "  make api          Start only the FastAPI dev server\n"

@@ -1,6 +1,6 @@
 # Codex Capability Guide
 
-Use this guide to route Codex work in OSINT CaseOps without adding repo-local skill files or nested `AGENTS.md` files. The root `AGENTS.md` remains the contributor entry point unless a subtree later needs genuinely different rules.
+Use this guide to route Codex work in Fraud Monitor without adding repo-local skill files or nested `AGENTS.md` files. The root `AGENTS.md` remains the contributor entry point unless a subtree later needs genuinely different rules.
 
 ## Always Start With Repo Context
 
@@ -21,7 +21,7 @@ Use this guide to route Codex work in OSINT CaseOps without adding repo-local sk
 
 ## Currently Unneeded
 
-Do not route normal OSINT CaseOps work through Stripe, Supabase, Canva, Gmail, Google Calendar, iOS, macOS, or Game Studio capabilities unless the product scope changes to include payments, hosted Postgres, marketing assets, inbox/calendar workflows, native apps, or game features.
+Do not route normal Fraud Monitor work through Stripe, Supabase, Canva, Gmail, Google Calendar, iOS, macOS, or Game Studio capabilities unless the product scope changes to include payments, hosted Postgres, marketing assets, inbox/calendar workflows, native apps, or game features.
 
 Do not add shadcn-specific workflow unless the repo adopts shadcn UI and adds `components.json`.
 

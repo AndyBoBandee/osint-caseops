@@ -1,6 +1,6 @@
-# OSINT CaseOps Visual Implementation Notes
+# Fraud Monitor Visual Implementation Notes
 
-Use this alongside `osint-caseops.css` and the UI mockup image.
+Use this alongside the existing `osint-caseops.css` stylesheet name and the UI mockup image. The stylesheet filename is a stable technical artifact; Fraud Monitor is the active product brand.
 
 ## Visual Direction
 

@@ -1,196 +1,233 @@
 # Milestones
 
-## Milestone 1: Repository Foundation
+This file tracks the current Fraud Monitor direction. The earlier OSINT CaseOps
+case, entity, enrichment, finding, graph, timeline, and report roadmap is legacy
+direction unless it is explicitly reintroduced.
+
+## Milestone 1: Local Foundation
 
 Status: Complete.
 
 Deliverables:
 
-- Project folder structure.
-- Initial docs.
-- Web app scaffold.
-- API scaffold.
-- Docker Compose.
-- SQLite setup.
-- Basic health checks.
+- Monorepo structure.
+- Next.js web app shell.
+- FastAPI backend shell.
+- SQLite database setup.
+- Docker Compose for local development.
+- Health checks.
+- Responsible-use and brand guidance.
 
 Acceptance:
 
 - Developer can start the local stack.
-- Web app can call API health endpoint.
+- Web app can call API health endpoints.
 - API can read and write to SQLite.
+- Local runtime data stays outside commits.
 
 Verification:
 
 - `infra/docker/docker-compose.yml` starts the `api` and `web` services.
-- The web app reads `API_BASE_URL` and renders the API `/health` result in the foundation status panel.
-- The API initializes the local SQLite database on startup and `/health/db` writes and reads the `app_health` row.
-- `tests/api/test_health.py` verifies API health and SQLite read/write behavior against an isolated temporary data directory.
+- The web app reads `API_BASE_URL` and renders API health.
+- The API initializes the local SQLite database on startup and `/health/db`
+  writes and reads the `app_health` row.
+- `tests/api/test_health.py` verifies API health and SQLite read/write behavior
+  against an isolated temporary data directory.
 
-## Milestone 2: Case And Entity System
+## Milestone 2: Fraud Monitor Dashboard
 
 Status: Complete.
 
 Deliverables:
 
-- Case CRUD.
-- Entity CRUD.
-- Scope acknowledgment.
-- Tags and notes.
-- Case dashboard.
+- Fraud Monitor dashboard as the first product surface.
+- Fixed keyword workflow for `fraud`.
+- Provider readiness panel.
+- Manual run control.
+- Local schedule control.
+- Runtime status for idle, running, ready provider count, and latest provider
+  issue.
+- Job history and dashboard metrics.
 
 Acceptance:
 
-- User can create a scoped case.
-- User can add a domain or URL entity.
-- Case and entity records persist after restart.
+- User can open the app and immediately see the Fraud Monitor dashboard.
+- User can tell whether the API and configured providers are usable.
+- User can run one scan at a time or enable scheduled local scans.
+- Overlapping manual or scheduled jobs do not corrupt state.
 
 Verification:
 
-- The API exposes SQLite-backed CRUD endpoints for cases, nested case entities, and direct entity updates/deletes.
-- Case creation requires an explicit lawful public-source scope acknowledgment and records the acknowledgment timestamp.
-- Domain and URL entities are normalized and validated before persistence.
-- The web app renders a case dashboard with case create/read/update/delete controls, entity create/read/update/delete controls, tags, notes, and scope status.
-- `tests/api/test_cases.py` verifies scope acknowledgment, case CRUD, entity CRUD, domain and URL validation, duplicate protection, cascading case deletion, and restart persistence against an isolated temporary data directory.
-- `scripts/smoke.sh` verifies the Docker stack can create a scoped case through the web proxy, add domain and URL entities, restart the API container, and read the persisted entities.
+- `tests/api/test_fraud_monitor.py` verifies dashboard bootstrap, provider
+  readiness, manual job execution, partial provider failures, overlap rejection,
+  and scheduled run behavior.
+- `scripts/smoke.sh` verifies dashboard rendering, schedule updates, and manual
+  run behavior through the Docker stack.
 
-## Milestone 3: Passive Enrichment
+## Milestone 3: Public Result Ingestion And Review
 
 Status: Complete.
 
 Deliverables:
 
-- DNS lookup.
-- RDAP lookup.
-- HTTP status.
-- Redirect chain.
-- TLS certificate summary.
-- Security headers.
-- Page title.
-- robots.txt and sitemap checks.
-
-Acceptance:
-
-- User can run enrichment for a domain or URL.
-- Results are stored as enrichment runs.
-- Failed modules report clear errors without breaking the case.
-
-Verification:
-
-- The API exposes SQLite-backed enrichment run endpoints for case and entity run history.
-- Domain and URL enrichment derives a passive target and records DNS, RDAP, HTTP status, redirect chain, TLS certificate, security header, page title, robots.txt, and sitemap module results.
-- Individual module failures are stored with clear error messages while the enrichment run remains available for review.
-- The web app renders enrichment controls, per-entity latest run status, and module-level result summaries.
-- `tests/api/test_enrichment.py` verifies stored run results, failed-module error reporting, URL target derivation, unsupported entity rejection, and restart persistence against an isolated temporary data directory.
-- `scripts/smoke.sh` verifies the Docker stack can create a scoped case through the web proxy, add domain and URL entities, run passive enrichment for the domain entity, restart the API container, and read persisted entities.
-
-## Milestone 4: Public News Trend Monitoring
-
-Status: Complete.
-
-Deliverables:
-
-- Keyword set management for scoped public news monitoring.
-- Brave Search API or similar public news/search provider integration.
-- Public news/search ingestion run records.
-- Result review queue with source URL, publisher, title, snippet, published date when available, retrieval timestamp, and query keyword.
+- Public provider integrations for passive result ingestion.
+- Provider run records with status, error text, and result counts.
+- Stored public results with source URL, publisher, title, snippet, published
+  date when available, retrieval timestamp, provider, and query keyword.
+- Analyst review statuses: pending, relevant, and not relevant.
+- Review filters by status, provider, and evidence state.
 - Basic trend grouping by keyword, source, time window, and repeated theme.
-- Save relevant public news results as evidence links.
 
 Acceptance:
 
-- User can run a scoped keyword scan for scam, fraud, crime, impersonation, or adjacent public-interest terms.
-- Returned public news/search results are stored for analyst review without making unsupported conclusions.
-- User can save relevant results as evidence.
-- User can view a basic trend summary with source attribution and confidence-aware language.
+- User can run a scoped fraud scan across configured ready providers.
+- Returned public results are stored for analyst review.
+- Provider failures are visible without blocking successful provider results.
+- Trend language remains confidence-aware and requires analyst review.
 
 Verification:
 
-- The API exposes SQLite-backed keyword set, public search ingestion run, news result review,
-  evidence link, and trend summary endpoints.
-- Keyword scans require scam, fraud, crime, impersonation, or adjacent public-interest terms before
-  provider requests are made.
-- Public search results store source URL, publisher, title, snippet, published date when available,
-  retrieval timestamp, and query keyword for analyst review.
-- Trend summaries group stored results by keyword, source, time window, and repeated theme with
-  confidence-aware wording that requires analyst review.
-- Relevant public results can be marked as evidence links without making unsupported conclusions.
-- `tests/api/test_news_monitoring.py` verifies keyword set validation, mocked provider ingestion,
-  review queue updates, evidence saves, trend grouping, provider failure handling, and restart
-  persistence against an isolated temporary data directory.
+- `tests/api/test_fraud_monitor.py` verifies provider-backed job results,
+  normalized provider failures, review status updates, and dashboard result
+  fields.
+- `tests/api/test_news_monitoring.py` verifies the reusable public news
+  ingestion, review, evidence, trend grouping, provider failure, and persistence
+  behavior.
 
-## Milestone 5: Evidence Capture
+## Milestone 4: Evidence Links And Deterministic Smoke
+
+Status: Complete.
 
 Deliverables:
 
-- Screenshot capture.
-- Evidence records.
-- Local artifact storage.
-- File hashing.
-- Evidence-to-entity and evidence-to-finding links.
+- Save public result source links as evidence.
+- Analyst note capture when saving evidence.
+- Evidence count and saved state on the dashboard.
+- Test-only fixture provider gated by `OSINT_CASEOPS_ENABLE_FIXTURE_PROVIDER`.
+- Docker smoke flow that makes no live provider requests.
 
 Acceptance:
 
-- User can capture screenshot evidence.
-- Evidence files are stored locally.
-- Evidence metadata is visible in the case.
+- User can mark a result relevant and save its source as evidence.
+- Evidence saves retain the source URL, query keyword, and analyst note.
+- Fixture smoke runs are deterministic and cannot be enabled accidentally by
+  naming the provider alone.
+- The product can be validated without network-backed provider calls.
 
-## Milestone 6: Findings
+Verification:
+
+- `tests/api/test_fraud_monitor.py` verifies evidence wrapper behavior and
+  fixture provider gating.
+- `scripts/smoke.sh` verifies fixture run, review update, evidence save,
+  filters, and schedule behavior through the Docker stack.
+- `make smoke` is the required end-to-end gate for this milestone.
+
+## Milestone 5: Review Operations
+
+Status: Complete.
 
 Deliverables:
 
-- Finding creation.
-- Generated finding suggestions.
-- Confidence labels.
-- Severity labels.
-- Manual verification status.
+- Result search and sort controls.
+- Clear duplicate or already-saved indicators.
+- Editable analyst notes after evidence save.
+- Bulk review actions for stored results.
+- Pagination or virtualized rendering for larger result sets.
+- Source-open affordances that keep local state intact.
 
 Acceptance:
 
-- User can turn enrichment results into findings.
-- User can edit confidence and severity.
-- Findings show linked evidence.
+- User can work a larger fraud result queue without losing context.
+- User can correct review and evidence notes after initial save.
+- User can identify already-handled or duplicate sources quickly.
+- Bulk actions require clear user intent and never make automated fraud
+  conclusions.
 
-## Milestone 7: Reports
+Verification:
+
+- Backend tests cover note edits, bulk review updates, duplicate handling, and
+  pagination boundaries.
+- Frontend tests or rendered QA cover filters, search, bulk actions, and note
+  edit flows.
+- `make test-fast`, web build, and `make smoke` pass.
+
+## Milestone 6: Provider Quality And Trend Utility
+
+Status: Next.
 
 Deliverables:
 
-- Markdown report export.
-- JSON case bundle export.
-- Report preview.
-- Evidence table.
-- Timeline section.
-- Recommendations section.
+- Provider-specific request limits and timeout documentation.
+- Provider health details that distinguish unsupported, missing configuration,
+  timeout, partial success, and ready states.
+- Trend groups that are useful for triage rather than claims.
+- Source-quality and recency cues for analyst prioritization.
+- Safer retry/backoff behavior for scheduled runs.
 
 Acceptance:
 
-- User can export a complete Markdown report.
-- Export includes scope, methodology, findings, evidence, and recommendations.
+- User can understand why a provider did or did not contribute results.
+- Scheduled scans behave predictably when a provider is slow or unavailable.
+- Trend summaries help prioritize review while preserving analyst judgment.
+- All provider behavior remains passive and public-source only.
 
-## Milestone 8: Graph And Timeline
+Verification:
+
+- API tests cover provider status classification, timeout handling, retry/backoff
+  decisions, and trend grouping edge cases.
+- Docs name external request behavior, rate limits, configuration, and safety
+  limits for each provider.
+- `make check` and `make smoke` pass with fixture-provider coverage.
+
+## Milestone 7: Local Export And Audit Bundle
+
+Status: Planned.
 
 Deliverables:
 
-- Relationship graph.
-- Timeline view.
-- Automatic timeline events.
-- Relationship records.
+- Markdown export for reviewed fraud monitor results.
+- JSON bundle export for local audit and backup.
+- Evidence table with source URLs, provider, review status, analyst notes, and
+  retrieval timestamps.
+- Trend summary section with confidence-aware wording.
+- Export metadata for scope, methodology, provider configuration, and generated
+  timestamp.
 
 Acceptance:
 
-- User can see how case entities, evidence, and findings connect.
-- User can review case activity in chronological order.
+- User can export reviewed local data without cloud sync.
+- Exports include enough provenance to audit where each result came from.
+- Exports avoid unsupported allegations and preserve responsible-use language.
 
-## Milestone 9: Change Monitoring
+Verification:
+
+- API tests cover export structure, escaping, local-only data access, and empty
+  state behavior.
+- Smoke or rendered QA verifies a user-visible export flow.
+
+## Milestone 8: Pilot Readiness
+
+Status: Planned.
 
 Deliverables:
 
-- Scheduled re-checks.
-- Change detection.
-- Change timeline events.
-- In-app alerts.
+- Setup checklist for local operators.
+- Configuration validation for provider choices and fixture-only test mode.
+- Data retention and cleanup guidance.
+- Release checklist with privacy, safety, and local-storage review.
+- Stable product docs that route new work through Fraud Monitor.
 
 Acceptance:
 
-- User can monitor a domain or URL.
-- The app records meaningful changes between checks.
+- A new local operator can bootstrap, run, review, save evidence, and export
+  without undocumented steps.
+- Test-only provider behavior is clearly separated from real provider behavior.
+- Current docs no longer steer default work toward the legacy OSINT CaseOps
+  path.
+
+Verification:
+
+- `make bootstrap`, `make check`, and `make smoke` pass from a clean checkout.
+- Rendered QA validates the primary dashboard workflow.
+- Documentation review confirms the legacy path is labeled as legacy and current
+  next work follows the Fraud Monitor milestones.

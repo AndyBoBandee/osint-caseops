@@ -142,6 +142,56 @@
   gap: var(--space-3);
 }
 
+.fm-filter-row {
+  display: grid;
+  grid-template-columns: minmax(16rem, 1.4fr) repeat(5, minmax(8rem, 1fr));
+  gap: var(--space-3);
+  align-items: end;
+  margin-bottom: var(--space-4);
+}
+
+.fm-search-field {
+  min-width: 0;
+}
+
+.fm-limit-field,
+.fm-bulk-status {
+  min-width: 8rem;
+}
+
+.fm-bulk-row,
+.fm-pagination-row,
+.fm-source-row,
+.fm-note-row,
+.fm-result-badges {
+  display: flex;
+  gap: var(--space-3);
+}
+
+.fm-bulk-row,
+.fm-pagination-row {
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  margin-bottom: var(--space-4);
+}
+
+.fm-source-row,
+.fm-note-row {
+  align-items: flex-end;
+}
+
+.fm-source-row .oc-technical,
+.fm-note-row .oc-field {
+  flex: 1;
+  min-width: 0;
+}
+
+.fm-result-badges {
+  align-items: center;
+  flex-wrap: wrap;
+}
+
 .fm-result {
   display: grid;
   gap: var(--space-3);
@@ -152,6 +202,11 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-3);
+}
+
+.fm-select-result {
+  flex: 0 0 auto;
+  padding-top: 0.25rem;
 }
 
 .fm-result h3 {
@@ -170,6 +225,11 @@
   color: var(--text-secondary);
   font-size: 0.9rem;
   line-height: 1.55;
+}
+
+.fm-note-input {
+  min-height: 5rem;
+  resize: vertical;
 }
 
 .oc-dashboard {
@@ -518,8 +578,14 @@
   }
 
   .fm-stat-grid,
-  .fm-control-grid {
+  .fm-control-grid,
+  .fm-filter-row,
+  .fm-bulk-row,
+  .fm-source-row,
+  .fm-note-row {
     grid-template-columns: 1fr;
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .oc-menu-bar {

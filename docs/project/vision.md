@@ -1,74 +1,34 @@
-# OSINT CaseOps Vision
+# Fraud Monitor Vision
 
 ## Purpose
 
-OSINT CaseOps is a local-first, open-source workbench for ethical public-source investigations. It is designed to help analysts move from loose public data to scoped, evidence-backed findings and clear reports.
-
-The product is not another raw recon script. Its main value is the investigation workflow: cases, entities, evidence, confidence, relationships, timelines, and reports.
+Fraud Monitor is a local-first dashboard for passive public-source monitoring of the fixed keyword `fraud`. It helps analysts run visible provider jobs, review returned sources, and save useful links as evidence without sending case data to a hosted service.
 
 ## Mission
 
-Help users conduct ethical public-source research by turning scattered information into structured, verified, and reportable intelligence.
+Help analysts monitor public fraud reporting in a calm, repeatable, evidence-first workflow.
 
 ## Vision
 
-Open-source intelligence work should be responsible, transparent, organized, and accessible to people who need it for legitimate research, fraud prevention, security awareness, and public-interest analysis.
-
-## Brand Promise
-
-Primary promise:
-
-> Turn public data into defensible intelligence.
-
-Supporting promise:
-
-> Public-source research, organized by case.
-
-## Problem
-
-Many OSINT tools are good at finding data, but they leave the analyst to answer the harder questions:
-
-- What is relevant?
-- How reliable is the source?
-- What evidence supports a claim?
-- What changed over time?
-- How should the result be explained to another person?
-
-This creates a gap between simple discovery scripts and heavy commercial intelligence platforms.
+Fraud monitoring should be transparent, source-attributed, and reviewable. The product should make provider runs, stored results, analyst decisions, and limitations easy to inspect.
 
 ## Product Direction
 
-The first product version should focus on domain and URL investigation for scam review, vendor review, small-business exposure checks, and owned-asset audits.
+The first product version focuses on one concrete workflow:
 
-The system should:
+- Run on-demand public searches for `fraud`.
+- Enable or disable a local scheduled monitor while the API process is running.
+- Store runs, results, review status, trend groups, and evidence links in local SQLite.
+- Keep provider status and errors visible.
+- Require analyst review before treating public results as useful evidence.
 
-- Run locally by default.
-- Store case data and evidence locally.
-- Use passive public-source checks in the MVP.
-- Require an investigation scope before work starts.
-- Preserve evidence with timestamps and hashes.
-- Help users separate facts, assumptions, confidence, and recommendations.
-- Export useful reports without requiring a cloud service.
-
-## Differentiators
-
-- Case-first workflow rather than tool-first data dumping.
-- Local-first privacy for sensitive investigations.
-- Evidence preservation as a core feature.
-- Confidence and source reliability labels.
-- Relationship graph and timeline for context.
-- Responsible-use guardrails built into normal workflows.
+The broader OSINT CaseOps case-management idea is legacy direction unless it is explicitly reintroduced into the Fraud Monitor roadmap.
 
 ## Values
 
 - Ethical by design.
+- Passive public-source methods.
 - Evidence over assumption.
-- Clarity over complexity.
 - Local-first privacy.
-- Confidence matters.
-- Practical utility.
-- Transparent methods and limitations.
-
-## Long-Term Direction
-
-After the MVP is stable, OSINT CaseOps can expand into change monitoring, optional API integrations, richer graph analysis, team workflows, and import/export compatibility with threat-intelligence tools.
+- Clear source attribution.
+- Human review before conclusions.

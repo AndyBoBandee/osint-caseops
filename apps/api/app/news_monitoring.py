@@ -175,6 +175,7 @@ class NewsResultRecord(BaseModel):
     id: str
     case_id: str
     run_id: str
+    provider: str = ""
     keyword: str
     source_url: str
     publisher: str
@@ -185,6 +186,9 @@ class NewsResultRecord(BaseModel):
     review_status: ReviewStatus
     saved_as_evidence: bool
     evidence_link_id: str | None = None
+    evidence_analyst_note: str = ""
+    seen_count: int = 1
+    duplicate_count: int = 0
     theme: str
     created_at: str
 
@@ -222,6 +226,10 @@ class EvidenceLinkCreate(BaseModel):
     @classmethod
     def clean_analyst_note(cls, value: str) -> str:
         return normalize_long_text(value)
+
+
+class EvidenceLinkUpdate(EvidenceLinkCreate):
+    pass
 
 
 class EvidenceLinkRecord(BaseModel):
@@ -289,7 +297,11 @@ def row_to_keyword_set(row: sqlite3.Row) -> dict[str, Any]:
 
 def row_to_news_result(row: sqlite3.Row) -> dict[str, Any]:
     payload = dict(row)
+    payload["provider"] = payload.get("provider", "")
     payload["saved_as_evidence"] = bool(payload["saved_as_evidence"])
+    payload["evidence_analyst_note"] = payload.get("evidence_analyst_note") or ""
+    payload["seen_count"] = int(payload.get("seen_count") or 1)
+    payload["duplicate_count"] = max(payload["seen_count"] - 1, 0)
     return payload
 
 
@@ -297,6 +309,9 @@ def row_to_news_run(row: sqlite3.Row, results: list[dict[str, Any]] | None = Non
     payload = dict(row)
     payload["query_keywords"] = decode_json_list(payload.pop("query_keywords_json"))
     payload["results"] = results or []
+    for result in payload["results"]:
+        if not result.get("provider"):
+            result["provider"] = payload["provider"]
     return payload
 
 
@@ -496,6 +511,37 @@ def search_brave(keyword: str, max_results: int) -> list[ProviderResult]:
     return results
 
 
+def search_fixture_news(keyword: str, max_results: int) -> list[ProviderResult]:
+    if not get_settings().enable_fixture_provider:
+        raise RuntimeError("Set OSINT_CASEOPS_ENABLE_FIXTURE_PROVIDER=1 before using fixture.")
+
+    retrieved_at = utc_now()
+    templates = [
+        (
+            "Public fraud reporting fixture",
+            "Public reporting describes a recurring fraud pattern for analyst review.",
+            "https://fixture.example/public-fraud-reporting",
+        ),
+        (
+            "Agency fraud warning fixture",
+            "A public agency warning gives source context without private-person profiling.",
+            "https://fixture.example/agency-fraud-warning",
+        ),
+    ]
+    return [
+        ProviderResult(
+            keyword=keyword,
+            source_url=url,
+            publisher="Fixture Public Source",
+            title=title,
+            snippet=snippet,
+            published_at="2026-05-30T12:00:00Z",
+            retrieved_at=retrieved_at,
+        )
+        for title, snippet, url in templates[: max(1, min(max_results, len(templates)))]
+    ]
+
+
 def search_public_news_with_provider(
     keyword: str,
     provider: str,
@@ -513,6 +559,8 @@ def search_public_news_with_provider(
         return search_google_news_rss(keyword, limit)
     if normalized_provider == "hn_algolia":
         return search_hn_algolia(keyword, limit)
+    if normalized_provider == "fixture":
+        return search_fixture_news(keyword, limit)
     raise RuntimeError(f"Unsupported news provider: {provider}.")
 
 
@@ -557,10 +605,12 @@ def store_news_results(
                 snippet,
                 published_at,
                 retrieved_at,
+                seen_count,
+                last_seen_at,
                 theme,
                 created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
             ON CONFLICT(case_id, source_url, keyword) DO UPDATE SET
                 run_id = excluded.run_id,
                 publisher = excluded.publisher,
@@ -568,6 +618,8 @@ def store_news_results(
                 snippet = excluded.snippet,
                 published_at = excluded.published_at,
                 retrieved_at = excluded.retrieved_at,
+                seen_count = news_results.seen_count + 1,
+                last_seen_at = excluded.last_seen_at,
                 theme = excluded.theme
             """,
             (
@@ -581,6 +633,7 @@ def store_news_results(
                 result.snippet,
                 result.published_at,
                 result.retrieved_at,
+                result.retrieved_at,
                 theme,
                 created_at,
             ),
@@ -593,7 +646,7 @@ def store_news_results(
             """,
             (case_id, result.source_url, result.keyword),
         ).fetchone()
-        if row is not None:
+        if row is not None and row["id"] not in {existing["id"] for existing in stored}:
             stored.append(row_to_news_result(row))
     return stored
 
@@ -619,8 +672,12 @@ def get_run_with_results(run_id: str, connection: sqlite3.Connection) -> dict[st
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="News run not found.")
     result_rows = connection.execute(
         """
-        SELECT *
+        SELECT news_results.*,
+            news_ingestion_runs.provider AS provider,
+            COALESCE(evidence_links.analyst_note, '') AS evidence_analyst_note
         FROM news_results
+        JOIN news_ingestion_runs ON news_ingestion_runs.id = news_results.run_id
+        LEFT JOIN evidence_links ON evidence_links.id = news_results.evidence_link_id
         WHERE run_id = ?
         ORDER BY retrieved_at DESC, created_at DESC
         """,
@@ -820,7 +877,16 @@ def list_news_ingestion_runs(case_id: str) -> list[dict[str, Any]]:
         runs: list[dict[str, Any]] = []
         for row in run_rows:
             result_rows = connection.execute(
-                "SELECT * FROM news_results WHERE run_id = ? ORDER BY retrieved_at DESC",
+                """
+                SELECT news_results.*,
+                    news_ingestion_runs.provider AS provider,
+                    COALESCE(evidence_links.analyst_note, '') AS evidence_analyst_note
+                FROM news_results
+                JOIN news_ingestion_runs ON news_ingestion_runs.id = news_results.run_id
+                LEFT JOIN evidence_links ON evidence_links.id = news_results.evidence_link_id
+                WHERE news_results.run_id = ?
+                ORDER BY news_results.retrieved_at DESC
+                """,
                 (row["id"],),
             ).fetchall()
             runs.append(row_to_news_run(row, [row_to_news_result(result) for result in result_rows]))
@@ -833,10 +899,14 @@ def list_news_results(case_id: str) -> list[dict[str, Any]]:
         get_case_or_404(case_id, connection)
         rows = connection.execute(
             """
-            SELECT *
+            SELECT news_results.*,
+                news_ingestion_runs.provider AS provider,
+                COALESCE(evidence_links.analyst_note, '') AS evidence_analyst_note
             FROM news_results
-            WHERE case_id = ?
-            ORDER BY retrieved_at DESC, created_at DESC
+            JOIN news_ingestion_runs ON news_ingestion_runs.id = news_results.run_id
+            LEFT JOIN evidence_links ON evidence_links.id = news_results.evidence_link_id
+            WHERE news_results.case_id = ?
+            ORDER BY news_results.retrieved_at DESC, news_results.created_at DESC
             """,
             (case_id,),
         ).fetchall()
@@ -852,6 +922,19 @@ def update_news_result(result_id: str, payload: NewsResultUpdate) -> dict[str, A
             (payload.review_status, result_id),
         )
         return get_news_result_or_404(result_id, connection)
+
+
+def get_evidence_link_or_404(
+    evidence_link_id: str,
+    connection: sqlite3.Connection,
+) -> dict[str, Any]:
+    row = connection.execute(
+        "SELECT * FROM evidence_links WHERE id = ?",
+        (evidence_link_id,),
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evidence link not found.")
+    return dict(row)
 
 
 @router.post(
@@ -870,6 +953,15 @@ def save_news_result_as_evidence(
             (result_id,),
         ).fetchone()
         if existing is not None:
+            if payload.analyst_note:
+                connection.execute(
+                    "UPDATE evidence_links SET analyst_note = ? WHERE id = ?",
+                    (payload.analyst_note, existing["id"]),
+                )
+                existing = connection.execute(
+                    "SELECT * FROM evidence_links WHERE id = ?",
+                    (existing["id"],),
+                ).fetchone()
             return dict(existing)
 
         evidence_id = str(uuid4())
@@ -922,6 +1014,24 @@ def save_news_result_as_evidence(
     return dict(row)
 
 
+@router.patch("/evidence-links/{evidence_link_id}", response_model=EvidenceLinkRecord)
+def update_evidence_link(
+    evidence_link_id: str,
+    payload: EvidenceLinkUpdate,
+) -> dict[str, Any]:
+    with connect() as connection:
+        existing = get_evidence_link_or_404(evidence_link_id, connection)
+        connection.execute(
+            "UPDATE evidence_links SET analyst_note = ? WHERE id = ?",
+            (payload.analyst_note, evidence_link_id),
+        )
+        connection.execute(
+            "UPDATE cases SET updated_at = ? WHERE id = ?",
+            (utc_now(), existing["case_id"]),
+        )
+        return get_evidence_link_or_404(evidence_link_id, connection)
+
+
 @router.get("/cases/{case_id}/evidence-links", response_model=list[EvidenceLinkRecord])
 def list_evidence_links(case_id: str) -> list[dict[str, Any]]:
     with connect() as connection:
@@ -972,10 +1082,14 @@ def get_news_trends(case_id: str) -> TrendSummary:
             row_to_news_result(row)
             for row in connection.execute(
                 """
-                SELECT *
+                SELECT news_results.*,
+                    news_ingestion_runs.provider AS provider,
+                    COALESCE(evidence_links.analyst_note, '') AS evidence_analyst_note
                 FROM news_results
-                WHERE case_id = ?
-                ORDER BY retrieved_at DESC, created_at DESC
+                JOIN news_ingestion_runs ON news_ingestion_runs.id = news_results.run_id
+                LEFT JOIN evidence_links ON evidence_links.id = news_results.evidence_link_id
+                WHERE news_results.case_id = ?
+                ORDER BY news_results.retrieved_at DESC, news_results.created_at DESC
                 """,
                 (case_id,),
             ).fetchall()

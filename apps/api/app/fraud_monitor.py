@@ -4,10 +4,11 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 import json
 import sqlite3
+import threading
 from typing import Any, Literal
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from app.cases import connect
@@ -15,10 +16,13 @@ from app.core.config import get_settings
 from app.news_monitoring import (
     EvidenceLinkCreate,
     EvidenceLinkRecord,
+    EvidenceLinkUpdate,
     NewsResultRecord,
     NewsResultUpdate,
+    ReviewStatus,
     RunStatus,
     TrendSummary,
+    get_evidence_link_or_404,
     get_news_result_or_404,
     get_news_trends,
     row_to_news_result,
@@ -26,6 +30,7 @@ from app.news_monitoring import (
     search_public_news_with_provider,
     store_news_results,
     summarize_run_status,
+    update_evidence_link,
     update_news_result,
 )
 
@@ -38,9 +43,20 @@ DEFAULT_INTERVAL_MINUTES = 60
 
 TriggerType = Literal["manual", "scheduled"]
 ProviderStatus = Literal["ready", "needs_key", "unsupported"]
+EvidenceFilter = Literal["all", "saved", "unsaved"]
+ResultSort = Literal[
+    "retrieved_desc",
+    "retrieved_asc",
+    "published_desc",
+    "published_asc",
+    "title_asc",
+    "source_asc",
+    "review_asc",
+]
 
 _scheduler_task: asyncio.Task[None] | None = None
 _scheduler_stop_event: asyncio.Event | None = None
+_job_lock = threading.Lock()
 
 
 def utc_now() -> str:
@@ -77,6 +93,13 @@ class FraudMonitorScheduleUpdate(BaseModel):
     interval_minutes: int | None = Field(default=None, ge=5, le=1440)
 
 
+class FraudMonitorRuntime(BaseModel):
+    is_running: bool
+    ready_provider_count: int
+    last_error_message: str
+    last_error_at: str
+
+
 class FraudMonitorJob(BaseModel):
     id: str
     keyword: str
@@ -91,6 +114,19 @@ class FraudMonitorJob(BaseModel):
     provider_runs: list[str] = Field(default_factory=list)
 
 
+class FraudMonitorResultPage(BaseModel):
+    total_matching: int
+    limit: int
+    offset: int
+    has_next: bool
+    has_previous: bool
+    search: str
+    sort: ResultSort
+    review_filter: ReviewStatus | Literal["all"]
+    provider_filter: str
+    evidence_filter: EvidenceFilter
+
+
 class FraudMonitorDashboard(BaseModel):
     keyword: str
     case_id: str
@@ -99,12 +135,24 @@ class FraudMonitorDashboard(BaseModel):
     latest_job: FraudMonitorJob | None
     jobs: list[FraudMonitorJob]
     results: list[NewsResultRecord]
+    result_page: FraudMonitorResultPage
     evidence_count: int
+    runtime: FraudMonitorRuntime
     trend_summary: TrendSummary
     total_results: int
     pending_results: int
     relevant_results: int
     not_relevant_results: int
+
+
+class FraudMonitorBulkReviewUpdate(BaseModel):
+    result_ids: list[str] = Field(min_length=1, max_length=200)
+    review_status: ReviewStatus
+
+
+class FraudMonitorBulkReviewResult(BaseModel):
+    updated_count: int
+    results: list[NewsResultRecord]
 
 
 def configured_providers() -> list[str]:
@@ -122,13 +170,19 @@ def configured_providers() -> list[str]:
 
 def provider_info(provider: str) -> ProviderInfo:
     settings = get_settings()
+    if provider == "fixture" and not settings.enable_fixture_provider:
+        return ProviderInfo(
+            name=provider,
+            status="unsupported",
+            note="Set OSINT_CASEOPS_ENABLE_FIXTURE_PROVIDER=1 before using the fixture provider.",
+        )
     if provider == "brave" and not settings.brave_search_api_key:
         return ProviderInfo(
             name=provider,
             status="needs_key",
             note="Set BRAVE_SEARCH_API_KEY before using Brave News Search.",
         )
-    if provider not in {"brave", "gdelt", "google_news_rss", "hn_algolia"}:
+    if provider not in {"brave", "fixture", "gdelt", "google_news_rss", "hn_algolia"}:
         return ProviderInfo(
             name=provider,
             status="unsupported",
@@ -257,18 +311,109 @@ def list_jobs(connection: sqlite3.Connection, limit: int = 12) -> list[FraudMoni
     return jobs
 
 
-def list_results(connection: sqlite3.Connection, case_id: str, limit: int = 50) -> list[dict[str, Any]]:
-    rows = connection.execute(
-        """
-        SELECT *
+def build_result_filters(
+    case_id: str,
+    search: str,
+    review_filter: ReviewStatus | Literal["all"],
+    provider_filter: str,
+    evidence_filter: EvidenceFilter,
+) -> tuple[list[str], list[Any]]:
+    clauses = ["news_results.case_id = ?"]
+    params: list[Any] = [case_id]
+    cleaned_search = " ".join(search.split())
+    if cleaned_search:
+        clauses.append(
+            """(
+                LOWER(news_results.title) LIKE ?
+                OR LOWER(news_results.snippet) LIKE ?
+                OR LOWER(news_results.publisher) LIKE ?
+                OR LOWER(news_results.source_url) LIKE ?
+                OR LOWER(news_results.theme) LIKE ?
+            )"""
+        )
+        search_param = f"%{cleaned_search.lower()}%"
+        params.extend([search_param, search_param, search_param, search_param, search_param])
+    if review_filter != "all":
+        clauses.append("news_results.review_status = ?")
+        params.append(review_filter)
+    if provider_filter != "all":
+        clauses.append("news_ingestion_runs.provider = ?")
+        params.append(provider_filter)
+    if evidence_filter == "saved":
+        clauses.append("news_results.saved_as_evidence = 1")
+    elif evidence_filter == "unsaved":
+        clauses.append("news_results.saved_as_evidence = 0")
+    return clauses, params
+
+
+def result_order_clause(sort: ResultSort) -> str:
+    return {
+        "retrieved_desc": "news_results.retrieved_at DESC, news_results.created_at DESC",
+        "retrieved_asc": "news_results.retrieved_at ASC, news_results.created_at ASC",
+        "published_desc": "news_results.published_at DESC, news_results.retrieved_at DESC",
+        "published_asc": "news_results.published_at ASC, news_results.retrieved_at ASC",
+        "title_asc": "LOWER(news_results.title) ASC, news_results.retrieved_at DESC",
+        "source_asc": "LOWER(news_results.publisher) ASC, news_results.retrieved_at DESC",
+        "review_asc": "news_results.review_status ASC, news_results.retrieved_at DESC",
+    }[sort]
+
+
+def list_results(
+    connection: sqlite3.Connection,
+    case_id: str,
+    search: str = "",
+    review_filter: ReviewStatus | Literal["all"] = "all",
+    provider_filter: str = "all",
+    evidence_filter: EvidenceFilter = "all",
+    sort: ResultSort = "retrieved_desc",
+    limit: int = 25,
+    offset: int = 0,
+) -> tuple[list[dict[str, Any]], FraudMonitorResultPage]:
+    clauses, params = build_result_filters(
+        case_id,
+        search,
+        review_filter,
+        provider_filter,
+        evidence_filter,
+    )
+    where_clause = " AND ".join(clauses)
+    total_row = connection.execute(
+        f"""
+        SELECT COUNT(*) AS count
         FROM news_results
-        WHERE case_id = ?
-        ORDER BY retrieved_at DESC, created_at DESC
-        LIMIT ?
+        JOIN news_ingestion_runs ON news_ingestion_runs.id = news_results.run_id
+        WHERE {where_clause}
         """,
-        (case_id, limit),
+        tuple(params),
+    ).fetchone()
+    total_matching = int(total_row["count"] if total_row else 0)
+    rows = connection.execute(
+        f"""
+        SELECT news_results.*,
+            news_ingestion_runs.provider AS provider,
+            COALESCE(evidence_links.analyst_note, '') AS evidence_analyst_note
+        FROM news_results
+        JOIN news_ingestion_runs ON news_ingestion_runs.id = news_results.run_id
+        LEFT JOIN evidence_links ON evidence_links.id = news_results.evidence_link_id
+        WHERE {where_clause}
+        ORDER BY {result_order_clause(sort)}
+        LIMIT ? OFFSET ?
+        """,
+        tuple(params + [limit, offset]),
     ).fetchall()
-    return [row_to_news_result(row) for row in rows]
+    page = FraudMonitorResultPage(
+        total_matching=total_matching,
+        limit=limit,
+        offset=offset,
+        has_next=offset + limit < total_matching,
+        has_previous=offset > 0,
+        search=" ".join(search.split()),
+        sort=sort,
+        review_filter=review_filter,
+        provider_filter=provider_filter,
+        evidence_filter=evidence_filter,
+    )
+    return [row_to_news_result(row) for row in rows], page
 
 
 def result_counts(connection: sqlite3.Connection, case_id: str) -> dict[str, int]:
@@ -304,6 +449,38 @@ def evidence_count(connection: sqlite3.Connection, case_id: str) -> int:
     return int(row["count"] if row else 0)
 
 
+def latest_error(connection: sqlite3.Connection) -> tuple[str, str]:
+    row = connection.execute(
+        """
+        SELECT error_message, completed_at
+        FROM fraud_monitor_jobs
+        WHERE error_message != ''
+        ORDER BY completed_at DESC, created_at DESC
+        LIMIT 1
+        """,
+    ).fetchone()
+    if row is None:
+        return "", ""
+    return row["error_message"], row["completed_at"]
+
+
+def normalize_provider_error(provider: str, exc: Exception) -> str:
+    message = " ".join(str(exc).split())
+    if "BRAVE_SEARCH_API_KEY" in message:
+        message = "Set BRAVE_SEARCH_API_KEY before using Brave News Search."
+    elif "HTTP " in message:
+        message = message.replace("News provider returned ", "Provider returned ")
+    elif "timed out" in message.lower() or "timeout" in message.lower():
+        message = "Provider request timed out; try again later."
+    elif "Unsupported news provider" in message:
+        message = "Unsupported provider; remove it from the provider configuration."
+    elif not message:
+        message = "Provider request failed; check network or provider availability."
+    elif len(message) > 180:
+        message = f"{message[:177]}..."
+    return f"{provider}: {message}"
+
+
 def create_provider_run(
     connection: sqlite3.Connection,
     case_id: str,
@@ -318,7 +495,7 @@ def create_provider_run(
     try:
         provider_results = search_public_news_with_provider(keyword, provider)
     except Exception as exc:
-        errors.append(f"{provider}: {exc}")
+        errors.append(normalize_provider_error(provider, exc))
 
     connection.execute(
         """
@@ -365,7 +542,7 @@ def create_provider_run(
     return run_id, run_status, len(stored_results), error_message
 
 
-def create_fraud_monitor_job(trigger_type: TriggerType = "manual") -> FraudMonitorJob:
+def run_fraud_monitor_job_locked(trigger_type: TriggerType = "manual") -> FraudMonitorJob:
     job_id = str(uuid4())
     started_at = utc_now()
 
@@ -461,16 +638,48 @@ def create_fraud_monitor_job(trigger_type: TriggerType = "manual") -> FraudMonit
     return row_to_job(row, [provider for _, provider in run_ids])
 
 
-def build_dashboard() -> FraudMonitorDashboard:
+def create_fraud_monitor_job(trigger_type: TriggerType = "manual") -> FraudMonitorJob:
+    if not _job_lock.acquire(blocking=False):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A fraud monitor job is already running.",
+        )
+    try:
+        return run_fraud_monitor_job_locked(trigger_type)
+    finally:
+        _job_lock.release()
+
+
+def build_dashboard(
+    search: str = "",
+    review_filter: ReviewStatus | Literal["all"] = "all",
+    provider_filter: str = "all",
+    evidence_filter: EvidenceFilter = "all",
+    sort: ResultSort = "retrieved_desc",
+    limit: int = 25,
+    offset: int = 0,
+) -> FraudMonitorDashboard:
     with connect() as connection:
         settings = ensure_monitor_settings(connection)
         case_id = settings["case_id"]
         jobs = list_jobs(connection)
-        results = list_results(connection, case_id)
+        results, result_page = list_results(
+            connection,
+            case_id,
+            search=search,
+            review_filter=review_filter,
+            provider_filter=provider_filter,
+            evidence_filter=evidence_filter,
+            sort=sort,
+            limit=limit,
+            offset=offset,
+        )
         counts = result_counts(connection, case_id)
         evidence_total = evidence_count(connection, case_id)
+        last_error_message, last_error_at = latest_error(connection)
 
     trend_summary = get_news_trends(case_id)
+    ready_provider_count = len(provider_names_for_run())
 
     return FraudMonitorDashboard(
         keyword=FRAUD_KEYWORD,
@@ -480,7 +689,14 @@ def build_dashboard() -> FraudMonitorDashboard:
         latest_job=jobs[0] if jobs else None,
         jobs=jobs,
         results=results,
+        result_page=result_page,
         evidence_count=evidence_total,
+        runtime=FraudMonitorRuntime(
+            is_running=_job_lock.locked(),
+            ready_provider_count=ready_provider_count,
+            last_error_message=last_error_message,
+            last_error_at=last_error_at,
+        ),
         trend_summary=trend_summary,
         total_results=counts["total"],
         pending_results=counts["pending"],
@@ -490,8 +706,24 @@ def build_dashboard() -> FraudMonitorDashboard:
 
 
 @router.get("/dashboard", response_model=FraudMonitorDashboard)
-def get_dashboard() -> FraudMonitorDashboard:
-    return build_dashboard()
+def get_dashboard(
+    search: str = Query(default="", max_length=200),
+    review: ReviewStatus | Literal["all"] = "all",
+    provider: str = Query(default="all", max_length=80),
+    evidence: EvidenceFilter = "all",
+    sort: ResultSort = "retrieved_desc",
+    limit: int = Query(default=25, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> FraudMonitorDashboard:
+    return build_dashboard(
+        search=search,
+        review_filter=review,
+        provider_filter=provider,
+        evidence_filter=evidence,
+        sort=sort,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.post("/jobs", response_model=FraudMonitorJob)
@@ -540,6 +772,55 @@ def update_result(result_id: str, payload: NewsResultUpdate) -> dict[str, Any]:
     return update_news_result(result_id, payload)
 
 
+@router.patch("/review-batches", response_model=FraudMonitorBulkReviewResult)
+def bulk_update_results(payload: FraudMonitorBulkReviewUpdate) -> FraudMonitorBulkReviewResult:
+    result_ids = list(dict.fromkeys(payload.result_ids))
+    placeholders = ", ".join("?" for _ in result_ids)
+    now = utc_now()
+    with connect() as connection:
+        settings = ensure_monitor_settings(connection)
+        case_id = settings["case_id"]
+        existing_rows = connection.execute(
+            f"""
+            SELECT id
+            FROM news_results
+            WHERE case_id = ? AND id IN ({placeholders})
+            """,
+            tuple([case_id, *result_ids]),
+        ).fetchall()
+        existing_ids = {row["id"] for row in existing_rows}
+        if existing_ids != set(result_ids):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="One or more results were not found.")
+
+        connection.execute(
+            f"""
+            UPDATE news_results
+            SET review_status = ?
+            WHERE case_id = ? AND id IN ({placeholders})
+            """,
+            tuple([payload.review_status, case_id, *result_ids]),
+        )
+        connection.execute("UPDATE cases SET updated_at = ? WHERE id = ?", (now, case_id))
+        rows = connection.execute(
+            f"""
+            SELECT news_results.*,
+                news_ingestion_runs.provider AS provider,
+                COALESCE(evidence_links.analyst_note, '') AS evidence_analyst_note
+            FROM news_results
+            JOIN news_ingestion_runs ON news_ingestion_runs.id = news_results.run_id
+            LEFT JOIN evidence_links ON evidence_links.id = news_results.evidence_link_id
+            WHERE news_results.case_id = ? AND news_results.id IN ({placeholders})
+            ORDER BY news_results.retrieved_at DESC, news_results.created_at DESC
+            """,
+            tuple([case_id, *result_ids]),
+        ).fetchall()
+
+    return FraudMonitorBulkReviewResult(
+        updated_count=len(rows),
+        results=[row_to_news_result(row) for row in rows],
+    )
+
+
 @router.post(
     "/results/{result_id}/evidence-links",
     response_model=EvidenceLinkRecord,
@@ -554,6 +835,19 @@ def save_result_evidence(result_id: str, payload: EvidenceLinkCreate) -> dict[st
     return save_news_result_as_evidence(result_id, payload)
 
 
+@router.patch("/evidence-links/{evidence_link_id}", response_model=EvidenceLinkRecord)
+def update_result_evidence_note(
+    evidence_link_id: str,
+    payload: EvidenceLinkUpdate,
+) -> dict[str, Any]:
+    with connect() as connection:
+        evidence_link = get_evidence_link_or_404(evidence_link_id, connection)
+        settings = ensure_monitor_settings(connection)
+        if evidence_link["case_id"] != settings["case_id"]:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evidence link not found.")
+    return update_evidence_link(evidence_link_id, payload)
+
+
 def run_due_fraud_monitor_jobs() -> None:
     with connect() as connection:
         settings = ensure_monitor_settings(connection)
@@ -561,7 +855,12 @@ def run_due_fraud_monitor_jobs() -> None:
             return
         if parse_utc(settings["next_run_at"]) > datetime.now(UTC):
             return
-    create_fraud_monitor_job("scheduled")
+    if not _job_lock.acquire(blocking=False):
+        return
+    try:
+        run_fraud_monitor_job_locked("scheduled")
+    finally:
+        _job_lock.release()
 
 
 async def scheduler_loop(stop_event: asyncio.Event) -> None:
