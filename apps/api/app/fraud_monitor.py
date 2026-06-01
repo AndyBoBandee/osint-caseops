@@ -24,6 +24,7 @@ from app.news_monitoring import (
     ReviewStatus,
     RunStatus,
     TrendSummary,
+    attach_artifacts_to_results,
     filter_static_news_results,
     get_evidence_link_or_404,
     get_news_result_or_404,
@@ -204,6 +205,7 @@ class FraudMonitorExportMetadata(BaseModel):
     provider_configuration: list[ProviderInfo]
     reviewed_result_count: int
     evidence_count: int
+    available_artifact_count: int
     local_only: bool
     responsible_use: str
 
@@ -216,6 +218,8 @@ class FraudMonitorEvidenceTableRow(BaseModel):
     fraud_state_label: str
     fraud_state_code: str
     analyst_note: str
+    available_artifact_count: int
+    vault_artifacts: list[str]
     retrieved_at: str
     published_at: str
     title: str
@@ -673,7 +677,7 @@ def list_results(
         provider_filter=provider_filter,
         evidence_filter=evidence_filter,
     )
-    return [row_to_news_result(row) for row in rows], page
+    return attach_artifacts_to_results(connection, [row_to_news_result(row) for row in rows]), page
 
 
 def result_counts(connection: sqlite3.Connection, case_id: str) -> dict[str, int]:
@@ -704,6 +708,18 @@ def result_counts(connection: sqlite3.Connection, case_id: str) -> dict[str, int
 def evidence_count(connection: sqlite3.Connection, case_id: str) -> int:
     row = connection.execute(
         "SELECT COUNT(*) AS count FROM evidence_links WHERE case_id = ?",
+        (case_id,),
+    ).fetchone()
+    return int(row["count"] if row else 0)
+
+
+def available_artifact_count(connection: sqlite3.Connection, case_id: str) -> int:
+    row = connection.execute(
+        """
+        SELECT COUNT(*) AS count
+        FROM evidence_artifacts
+        WHERE case_id = ? AND availability = 'available'
+        """,
         (case_id,),
     ).fetchone()
     return int(row["count"] if row else 0)
@@ -1049,14 +1065,14 @@ def list_reviewed_results(connection: sqlite3.Connection, case_id: str) -> list[
         """,
         (case_id,),
     ).fetchall()
-    return [row_to_news_result(row) for row in rows]
+    return attach_artifacts_to_results(connection, [row_to_news_result(row) for row in rows])
 
 
 def export_limitations() -> list[str]:
     return [
         "Public results are leads for analyst review, not automated fraud conclusions.",
         "The bundle contains local data only and does not synchronize to a cloud service.",
-        "Source links should be reopened before external sharing because public pages can change.",
+        "Vault artifacts are local preservation aids; source links should still be reopened before external sharing.",
         "Redact sensitive details before sending exports outside the local investigation context.",
     ]
 
@@ -1076,6 +1092,12 @@ def build_export_bundle() -> FraudMonitorExportBundle:
                 fraud_state_label=result["fraud_state_label"],
                 fraud_state_code=result["fraud_state_code"],
                 analyst_note=result["evidence_analyst_note"],
+                available_artifact_count=result["available_artifact_count"],
+                vault_artifacts=[
+                    artifact["storage_path"] or artifact["source_url"]
+                    for artifact in result["evidence_artifacts"]
+                    if artifact["availability"] == "available"
+                ],
                 retrieved_at=result["retrieved_at"],
                 published_at=result["published_at"],
                 title=result["title"] or result["source_url"],
@@ -1087,6 +1109,7 @@ def build_export_bundle() -> FraudMonitorExportBundle:
             for provider in configured_providers()
         ]
         evidence_total = evidence_count(connection, case_id)
+        artifact_total = available_artifact_count(connection, case_id)
 
     trend_summary = get_news_trends(case_id)
     return FraudMonitorExportBundle(
@@ -1100,6 +1123,7 @@ def build_export_bundle() -> FraudMonitorExportBundle:
             provider_configuration=providers,
             reviewed_result_count=len(reviewed_results),
             evidence_count=evidence_total,
+            available_artifact_count=artifact_total,
             local_only=True,
             responsible_use=(
                 "Exports preserve source context and confidence-aware language. They must not be "
@@ -1137,6 +1161,7 @@ def export_bundle_to_markdown(bundle: FraudMonitorExportBundle) -> str:
         f"- Methodology: {bundle.metadata.methodology}",
         f"- Reviewed results: {bundle.metadata.reviewed_result_count}",
         f"- Evidence links: {bundle.metadata.evidence_count}",
+        f"- Available vault artifacts: {bundle.metadata.available_artifact_count}",
         f"- Local only: {'yes' if bundle.metadata.local_only else 'no'}",
         f"- Responsible use: {bundle.metadata.responsible_use}",
         "",
@@ -1191,6 +1216,7 @@ def export_bundle_to_markdown(bundle: FraudMonitorExportBundle) -> str:
                     "Provider",
                     "Review",
                     "Analyst note",
+                    "Vault artifacts",
                     "Retrieved",
                     "Published",
                 ],
@@ -1203,6 +1229,7 @@ def export_bundle_to_markdown(bundle: FraudMonitorExportBundle) -> str:
                         row.provider,
                         row.review_status,
                         row.analyst_note,
+                        ", ".join(row.vault_artifacts) or "metadata only",
                         row.retrieved_at,
                         row.published_at,
                     ]

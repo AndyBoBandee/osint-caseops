@@ -170,6 +170,34 @@ def initialize_database() -> None:
             CREATE INDEX IF NOT EXISTS idx_evidence_links_case_id
                 ON evidence_links(case_id);
 
+            CREATE TABLE IF NOT EXISTS evidence_artifacts (
+                id TEXT PRIMARY KEY,
+                case_id TEXT NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+                evidence_link_id TEXT NOT NULL REFERENCES evidence_links(id) ON DELETE CASCADE,
+                news_result_id TEXT NOT NULL REFERENCES news_results(id) ON DELETE CASCADE,
+                artifact_type TEXT NOT NULL CHECK (
+                    artifact_type IN ('source_url', 'html_snapshot', 'text_snapshot', 'screenshot')
+                ),
+                display_name TEXT NOT NULL,
+                storage_path TEXT NOT NULL DEFAULT '',
+                media_type TEXT NOT NULL DEFAULT '',
+                byte_size INTEGER NOT NULL DEFAULT 0,
+                content_hash TEXT NOT NULL DEFAULT '',
+                source_url TEXT NOT NULL DEFAULT '',
+                captured_at TEXT NOT NULL,
+                retention_policy TEXT NOT NULL DEFAULT '',
+                availability TEXT NOT NULL CHECK (
+                    availability IN ('available', 'not_captured')
+                ) DEFAULT 'available',
+                capture_note TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_evidence_artifacts_evidence_link_id
+                ON evidence_artifacts(evidence_link_id);
+            CREATE INDEX IF NOT EXISTS idx_evidence_artifacts_case_id
+                ON evidence_artifacts(case_id);
+
             CREATE TABLE IF NOT EXISTS fraud_monitor_settings (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 case_id TEXT NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
@@ -273,6 +301,38 @@ def initialize_database() -> None:
             "filtered_result_count",
             "INTEGER NOT NULL DEFAULT 0",
         )
+        initialize_evidence_artifact_table(connection)
+
+
+def initialize_evidence_artifact_table(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS evidence_artifacts (
+            id TEXT PRIMARY KEY,
+            case_id TEXT NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+            evidence_link_id TEXT NOT NULL REFERENCES evidence_links(id) ON DELETE CASCADE,
+            news_result_id TEXT NOT NULL REFERENCES news_results(id) ON DELETE CASCADE,
+            artifact_type TEXT NOT NULL CHECK (
+                artifact_type IN ('source_url', 'html_snapshot', 'text_snapshot', 'screenshot')
+            ),
+            display_name TEXT NOT NULL,
+            storage_path TEXT NOT NULL DEFAULT '',
+            media_type TEXT NOT NULL DEFAULT '',
+            byte_size INTEGER NOT NULL DEFAULT 0,
+            content_hash TEXT NOT NULL DEFAULT '',
+            source_url TEXT NOT NULL DEFAULT '',
+            captured_at TEXT NOT NULL,
+            retention_policy TEXT NOT NULL DEFAULT '',
+            availability TEXT NOT NULL CHECK (
+                availability IN ('available', 'not_captured')
+            ) DEFAULT 'available',
+            capture_note TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    ensure_column(connection, "evidence_artifacts", "availability", "TEXT NOT NULL DEFAULT 'available'")
+    ensure_column(connection, "evidence_artifacts", "capture_note", "TEXT NOT NULL DEFAULT ''")
 
 
 def ensure_column(

@@ -653,8 +653,62 @@ def test_review_and_evidence_wrappers_update_fraud_results(tmp_path: Path, monke
     assert review_response.status_code == 200
     assert review_response.json()["review_status"] == "relevant"
     assert evidence_response.status_code == 201
+    assert {artifact["artifact_type"] for artifact in evidence_response.json()["artifacts"]} == {
+        "source_url",
+        "text_snapshot",
+    }
     assert refreshed["evidence_count"] == 1
     assert refreshed["relevant_results"] == 1
+    assert refreshed["results"][0]["available_artifact_count"] == 2
+    assert refreshed["results"][0]["vault_state"] == "artifacts_available"
+
+
+def test_saving_evidence_preserves_local_vault_artifacts_under_data_dir(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    def fake_search(keyword: str, provider: str) -> list[ProviderResult]:
+        return [fake_result(keyword, provider, 1)]
+
+    monkeypatch.setattr(fraud_monitor, "search_public_news_with_provider", fake_search)
+
+    screenshot = "data:image/png;base64,iVBORw0KGgo="
+    with make_client(tmp_path, monkeypatch, providers="gdelt") as client:
+        client.post("/fraud-monitor/jobs")
+        result_id = client.get("/fraud-monitor/dashboard").json()["results"][0]["id"]
+        evidence_response = client.post(
+            f"/fraud-monitor/results/{result_id}/evidence-links",
+            json={
+                "analyst_note": "Vault capture with local artifacts.",
+                "html_snapshot": "<html><body>public source</body></html>",
+                "text_snapshot": "Public source text snapshot.",
+                "screenshot_data_url": screenshot,
+            },
+        )
+        dashboard = client.get("/fraud-monitor/dashboard").json()
+        export_response = client.get("/fraud-monitor/exports/json")
+
+    assert evidence_response.status_code == 201
+    artifacts = evidence_response.json()["artifacts"]
+    artifact_types = {artifact["artifact_type"] for artifact in artifacts}
+    assert artifact_types == {"source_url", "text_snapshot", "html_snapshot", "screenshot"}
+    available = [artifact for artifact in artifacts if artifact["availability"] == "available"]
+    assert len(available) == 4
+    for artifact in available:
+        if artifact["storage_path"]:
+            artifact_path = tmp_path / artifact["storage_path"]
+            assert artifact_path.exists()
+            assert tmp_path in artifact_path.parents
+            assert artifact["byte_size"] == artifact_path.stat().st_size
+        assert artifact["content_hash"]
+        assert artifact["captured_at"]
+
+    result = dashboard["results"][0]
+    assert result["available_artifact_count"] == 4
+    assert result["vault_state"] == "artifacts_available"
+    bundle = export_response.json()
+    assert bundle["metadata"]["available_artifact_count"] == 4
+    assert len(bundle["evidence_table"][0]["vault_artifacts"]) == 4
 
 
 def test_fixture_provider_is_gated_and_deterministic(tmp_path: Path, monkeypatch) -> None:

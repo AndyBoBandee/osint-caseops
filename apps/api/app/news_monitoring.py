@@ -1,7 +1,10 @@
 from collections import Counter, defaultdict
+from base64 import b64decode
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
+from hashlib import sha256
 import json
+from pathlib import Path
 import re
 import sqlite3
 from typing import Any, Literal
@@ -25,6 +28,8 @@ SourceQuality = Literal["named_source", "unnamed_source"]
 RecencyCue = Literal["fresh", "recent", "older", "unknown"]
 ClassificationBasis = Literal["title", "snippet", "fallback"]
 FraudStateBasis = Literal["title", "snippet", "publisher", "source_url", "unknown"]
+EvidenceArtifactType = Literal["source_url", "html_snapshot", "text_snapshot", "screenshot"]
+EvidenceArtifactAvailability = Literal["available", "not_captured"]
 
 NEWS_TIMEOUT_SECONDS = 8
 MAX_NEWS_BODY_BYTES = 512_000
@@ -324,6 +329,9 @@ class NewsResultRecord(BaseModel):
     saved_as_evidence: bool
     evidence_link_id: str | None = None
     evidence_analyst_note: str = ""
+    evidence_artifacts: list["EvidenceArtifactRecord"] = Field(default_factory=list)
+    available_artifact_count: int = 0
+    vault_state: str = "not_saved"
     seen_count: int = 1
     duplicate_count: int = 0
     theme: str
@@ -370,11 +378,20 @@ class NewsResultUpdate(BaseModel):
 
 class EvidenceLinkCreate(BaseModel):
     analyst_note: str = Field(default="", max_length=2000)
+    html_snapshot: str = Field(default="", max_length=250000)
+    text_snapshot: str = Field(default="", max_length=50000)
+    screenshot_data_url: str = Field(default="", max_length=1000000)
+    capture_screenshot: bool = False
 
     @field_validator("analyst_note")
     @classmethod
     def clean_analyst_note(cls, value: str) -> str:
         return normalize_long_text(value)
+
+    @field_validator("html_snapshot", "text_snapshot", "screenshot_data_url")
+    @classmethod
+    def clean_optional_artifact_text(cls, value: str) -> str:
+        return value.strip()
 
 
 class EvidenceLinkUpdate(EvidenceLinkCreate):
@@ -393,6 +410,26 @@ class EvidenceLinkRecord(BaseModel):
     retrieved_at: str
     query_keyword: str
     analyst_note: str
+    created_at: str
+    artifacts: list["EvidenceArtifactRecord"] = Field(default_factory=list)
+
+
+class EvidenceArtifactRecord(BaseModel):
+    id: str
+    case_id: str
+    evidence_link_id: str
+    news_result_id: str
+    artifact_type: EvidenceArtifactType
+    display_name: str
+    storage_path: str
+    media_type: str
+    byte_size: int
+    content_hash: str
+    source_url: str
+    captured_at: str
+    retention_policy: str
+    availability: EvidenceArtifactAvailability
+    capture_note: str
     created_at: str
 
 
@@ -450,6 +487,14 @@ def row_to_news_result(row: sqlite3.Row) -> dict[str, Any]:
     payload["provider"] = payload.get("provider", "")
     payload["saved_as_evidence"] = bool(payload["saved_as_evidence"])
     payload["evidence_analyst_note"] = payload.get("evidence_analyst_note") or ""
+    payload["evidence_artifacts"] = payload.get("evidence_artifacts") or []
+    payload["available_artifact_count"] = int(payload.get("available_artifact_count") or 0)
+    if not payload["saved_as_evidence"]:
+        payload["vault_state"] = "not_saved"
+    elif payload["available_artifact_count"] > 0:
+        payload["vault_state"] = "artifacts_available"
+    else:
+        payload["vault_state"] = "metadata_only"
     payload["seen_count"] = int(payload.get("seen_count") or 1)
     payload["duplicate_count"] = max(payload["seen_count"] - 1, 0)
     payload["classification_label"] = payload.get("classification_label") or GENERAL_FRAUD_LABEL
@@ -465,6 +510,347 @@ def row_to_news_result(row: sqlite3.Row) -> dict[str, Any]:
     payload.pop("classification_terms_json", None)
     payload.pop("fraud_state_terms_json", None)
     return payload
+
+
+def row_to_evidence_artifact(row: sqlite3.Row) -> dict[str, Any]:
+    payload = dict(row)
+    payload["byte_size"] = int(payload.get("byte_size") or 0)
+    return payload
+
+
+def list_artifacts_for_evidence(
+    connection: sqlite3.Connection,
+    evidence_link_id: str,
+) -> list[dict[str, Any]]:
+    rows = connection.execute(
+        """
+        SELECT *
+        FROM evidence_artifacts
+        WHERE evidence_link_id = ?
+        ORDER BY
+            CASE artifact_type
+                WHEN 'source_url' THEN 1
+                WHEN 'text_snapshot' THEN 2
+                WHEN 'html_snapshot' THEN 3
+                WHEN 'screenshot' THEN 4
+                ELSE 5
+            END,
+            created_at ASC
+        """,
+        (evidence_link_id,),
+    ).fetchall()
+    return [row_to_evidence_artifact(row) for row in rows]
+
+
+def attach_artifacts_to_results(
+    connection: sqlite3.Connection,
+    results: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    for result in results:
+        evidence_link_id = result.get("evidence_link_id")
+        artifacts = list_artifacts_for_evidence(connection, evidence_link_id) if evidence_link_id else []
+        result["evidence_artifacts"] = artifacts
+        result["available_artifact_count"] = sum(1 for artifact in artifacts if artifact["availability"] == "available")
+        if not result["saved_as_evidence"]:
+            result["vault_state"] = "not_saved"
+        elif result["available_artifact_count"] > 0:
+            result["vault_state"] = "artifacts_available"
+        else:
+            result["vault_state"] = "metadata_only"
+    return results
+
+
+def artifact_storage_root() -> Path:
+    return get_settings().data_dir / "evidence-vault"
+
+
+def relative_artifact_path(path: Path) -> str:
+    return path.relative_to(get_settings().data_dir).as_posix()
+
+
+def write_vault_artifact(
+    connection: sqlite3.Connection,
+    *,
+    evidence_link_id: str,
+    case_id: str,
+    news_result_id: str,
+    artifact_type: EvidenceArtifactType,
+    display_name: str,
+    content: bytes,
+    media_type: str,
+    extension: str,
+    source_url: str,
+    captured_at: str,
+    capture_note: str,
+) -> dict[str, Any]:
+    artifact_id = str(uuid4())
+    artifact_dir = artifact_storage_root() / case_id / evidence_link_id
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    file_path = artifact_dir / f"{artifact_type}-{artifact_id}{extension}"
+    file_path.write_bytes(content)
+    content_hash = sha256(content).hexdigest()
+    connection.execute(
+        """
+        INSERT INTO evidence_artifacts (
+            id,
+            case_id,
+            evidence_link_id,
+            news_result_id,
+            artifact_type,
+            display_name,
+            storage_path,
+            media_type,
+            byte_size,
+            content_hash,
+            source_url,
+            captured_at,
+            retention_policy,
+            availability,
+            capture_note,
+            created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'available', ?, ?)
+        """,
+        (
+            artifact_id,
+            case_id,
+            evidence_link_id,
+            news_result_id,
+            artifact_type,
+            display_name,
+            relative_artifact_path(file_path),
+            media_type,
+            len(content),
+            content_hash,
+            source_url,
+            captured_at,
+            "Retain with the local case data until analyst deletion or case cleanup.",
+            capture_note,
+            captured_at,
+        ),
+    )
+    row = connection.execute("SELECT * FROM evidence_artifacts WHERE id = ?", (artifact_id,)).fetchone()
+    if row is None:
+        raise RuntimeError("Evidence artifact was not stored.")
+    return row_to_evidence_artifact(row)
+
+
+def store_reference_artifact(
+    connection: sqlite3.Connection,
+    *,
+    evidence_link_id: str,
+    case_id: str,
+    news_result_id: str,
+    source_url: str,
+    captured_at: str,
+) -> dict[str, Any]:
+    artifact_id = str(uuid4())
+    content_hash = sha256(source_url.encode("utf-8")).hexdigest()
+    connection.execute(
+        """
+        INSERT INTO evidence_artifacts (
+            id,
+            case_id,
+            evidence_link_id,
+            news_result_id,
+            artifact_type,
+            display_name,
+            storage_path,
+            media_type,
+            byte_size,
+            content_hash,
+            source_url,
+            captured_at,
+            retention_policy,
+            availability,
+            capture_note,
+            created_at
+        )
+        VALUES (?, ?, ?, ?, 'source_url', 'Source URL reference', '', 'text/uri-list', ?, ?, ?, ?, ?, 'available', ?, ?)
+        """,
+        (
+            artifact_id,
+            case_id,
+            evidence_link_id,
+            news_result_id,
+            len(source_url.encode("utf-8")),
+            content_hash,
+            source_url,
+            captured_at,
+            "Retain with the local case data until analyst deletion or case cleanup.",
+            "Source-link metadata preserved separately from local content artifacts.",
+            captured_at,
+        ),
+    )
+    row = connection.execute("SELECT * FROM evidence_artifacts WHERE id = ?", (artifact_id,)).fetchone()
+    if row is None:
+        raise RuntimeError("Evidence source reference was not stored.")
+    return row_to_evidence_artifact(row)
+
+
+def store_missing_screenshot_artifact(
+    connection: sqlite3.Connection,
+    *,
+    evidence_link_id: str,
+    case_id: str,
+    news_result_id: str,
+    source_url: str,
+    captured_at: str,
+) -> dict[str, Any]:
+    artifact_id = str(uuid4())
+    connection.execute(
+        """
+        INSERT INTO evidence_artifacts (
+            id,
+            case_id,
+            evidence_link_id,
+            news_result_id,
+            artifact_type,
+            display_name,
+            storage_path,
+            media_type,
+            byte_size,
+            content_hash,
+            source_url,
+            captured_at,
+            retention_policy,
+            availability,
+            capture_note,
+            created_at
+        )
+        VALUES (?, ?, ?, ?, 'screenshot', 'Screenshot capture', '', 'image/png', 0, '', ?, ?, ?, 'not_captured', ?, ?)
+        """,
+        (
+            artifact_id,
+            case_id,
+            evidence_link_id,
+            news_result_id,
+            source_url,
+            captured_at,
+            "Capture when a local screenshot is supplied; no remote automation is implied.",
+            "No screenshot file was supplied with this evidence save.",
+            captured_at,
+        ),
+    )
+    row = connection.execute("SELECT * FROM evidence_artifacts WHERE id = ?", (artifact_id,)).fetchone()
+    if row is None:
+        raise RuntimeError("Evidence screenshot metadata was not stored.")
+    return row_to_evidence_artifact(row)
+
+
+def decode_screenshot_data_url(value: str) -> tuple[bytes, str]:
+    if not value:
+        return b"", ""
+    prefix, _, payload = value.partition(",")
+    if not payload or ";base64" not in prefix:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="screenshot_data_url must be a base64 data URL.",
+        )
+    media_type = prefix.removeprefix("data:").split(";", 1)[0] or "image/png"
+    if media_type not in {"image/png", "image/jpeg", "image/webp"}:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Screenshot artifacts must be PNG, JPEG, or WebP data URLs.",
+        )
+    return b64decode(payload, validate=True), media_type
+
+
+def create_evidence_artifacts(
+    connection: sqlite3.Connection,
+    *,
+    evidence_link_id: str,
+    result: dict[str, Any],
+    payload: EvidenceLinkCreate,
+    captured_at: str,
+) -> list[dict[str, Any]]:
+    artifacts = [
+        store_reference_artifact(
+            connection,
+            evidence_link_id=evidence_link_id,
+            case_id=result["case_id"],
+            news_result_id=result["id"],
+            source_url=result["source_url"],
+            captured_at=captured_at,
+        )
+    ]
+    snapshot_text = payload.text_snapshot or "\n".join(
+        part
+        for part in [
+            f"Title: {result['title'] or result['source_url']}",
+            f"Source URL: {result['source_url']}",
+            f"Publisher: {result['publisher'] or 'Unknown source'}",
+            f"Published at: {result['published_at'] or 'unknown'}",
+            f"Retrieved at: {result['retrieved_at']}",
+            "",
+            result["snippet"] or "No provider snippet was stored.",
+        ]
+        if part is not None
+    )
+    artifacts.append(
+        write_vault_artifact(
+            connection,
+            evidence_link_id=evidence_link_id,
+            case_id=result["case_id"],
+            news_result_id=result["id"],
+            artifact_type="text_snapshot",
+            display_name="Provider text snapshot",
+            content=snapshot_text.encode("utf-8"),
+            media_type="text/plain; charset=utf-8",
+            extension=".txt",
+            source_url=result["source_url"],
+            captured_at=captured_at,
+            capture_note="Saved from provider-returned source metadata and analyst-supplied text.",
+        )
+    )
+    if payload.html_snapshot:
+        artifacts.append(
+            write_vault_artifact(
+                connection,
+                evidence_link_id=evidence_link_id,
+                case_id=result["case_id"],
+                news_result_id=result["id"],
+                artifact_type="html_snapshot",
+                display_name="HTML snapshot",
+                content=payload.html_snapshot.encode("utf-8"),
+                media_type="text/html; charset=utf-8",
+                extension=".html",
+                source_url=result["source_url"],
+                captured_at=captured_at,
+                capture_note="Saved from analyst-supplied source HTML.",
+            )
+        )
+    if payload.screenshot_data_url:
+        content, media_type = decode_screenshot_data_url(payload.screenshot_data_url)
+        extension = { "image/jpeg": ".jpg", "image/webp": ".webp" }.get(media_type, ".png")
+        artifacts.append(
+            write_vault_artifact(
+                connection,
+                evidence_link_id=evidence_link_id,
+                case_id=result["case_id"],
+                news_result_id=result["id"],
+                artifact_type="screenshot",
+                display_name="Screenshot capture",
+                content=content,
+                media_type=media_type,
+                extension=extension,
+                source_url=result["source_url"],
+                captured_at=captured_at,
+                capture_note="Saved from analyst-supplied screenshot data.",
+            )
+        )
+    elif payload.capture_screenshot:
+        artifacts.append(
+            store_missing_screenshot_artifact(
+                connection,
+                evidence_link_id=evidence_link_id,
+                case_id=result["case_id"],
+                news_result_id=result["id"],
+                source_url=result["source_url"],
+                captured_at=captured_at,
+            )
+        )
+    return artifacts
 
 
 def parse_source_datetime(value: str) -> datetime | None:
@@ -1378,7 +1764,9 @@ def get_evidence_link_or_404(
     ).fetchone()
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evidence link not found.")
-    return dict(row)
+    payload = dict(row)
+    payload["artifacts"] = list_artifacts_for_evidence(connection, evidence_link_id)
+    return payload
 
 
 @router.post(
@@ -1406,7 +1794,15 @@ def save_news_result_as_evidence(
                     "SELECT * FROM evidence_links WHERE id = ?",
                     (existing["id"],),
                 ).fetchone()
-            return dict(existing)
+            if not list_artifacts_for_evidence(connection, existing["id"]):
+                create_evidence_artifacts(
+                    connection,
+                    evidence_link_id=existing["id"],
+                    result=result,
+                    payload=payload,
+                    captured_at=utc_now(),
+                )
+            return get_evidence_link_or_404(existing["id"], connection)
 
         evidence_id = str(uuid4())
         now = utc_now()
@@ -1452,10 +1848,20 @@ def save_news_result_as_evidence(
             (evidence_id, result_id),
         )
         connection.execute("UPDATE cases SET updated_at = ? WHERE id = ?", (now, result["case_id"]))
+        create_evidence_artifacts(
+            connection,
+            evidence_link_id=evidence_id,
+            result=result,
+            payload=payload,
+            captured_at=now,
+        )
         row = connection.execute("SELECT * FROM evidence_links WHERE id = ?", (evidence_id,)).fetchone()
     if row is None:
         raise RuntimeError("Evidence link was not stored.")
-    return dict(row)
+    payload = dict(row)
+    with connect() as connection:
+        payload["artifacts"] = list_artifacts_for_evidence(connection, evidence_id)
+    return payload
 
 
 @router.patch("/evidence-links/{evidence_link_id}", response_model=EvidenceLinkRecord)
@@ -1489,7 +1895,7 @@ def list_evidence_links(case_id: str) -> list[dict[str, Any]]:
             """,
             (case_id,),
         ).fetchall()
-    return [dict(row) for row in rows]
+        return [get_evidence_link_or_404(row["id"], connection) for row in rows]
 
 
 def bucket_time(value: str) -> str:

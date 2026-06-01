@@ -4,6 +4,8 @@ export type NewsReviewStatus = "pending" | "relevant" | "not_relevant";
 export type NewsRunStatus = "success" | "partial" | "failed";
 export type TrendGroupType = "keyword" | "classification" | "source" | "time_window" | "theme";
 export type EvidenceFilter = "all" | "saved" | "unsaved";
+export type EvidenceArtifactType = "source_url" | "html_snapshot" | "text_snapshot" | "screenshot";
+export type EvidenceArtifactAvailability = "available" | "not_captured";
 export type ResultSort =
   | "retrieved_desc"
   | "retrieved_asc"
@@ -96,6 +98,9 @@ export type NewsResultRecord = {
   saved_as_evidence: boolean;
   evidence_link_id: string | null;
   evidence_analyst_note: string;
+  evidence_artifacts: EvidenceArtifactRecord[];
+  available_artifact_count: number;
+  vault_state: "not_saved" | "metadata_only" | "artifacts_available";
   seen_count: number;
   duplicate_count: number;
   theme: string;
@@ -109,6 +114,25 @@ export type NewsResultRecord = {
   source_quality: "named_source" | "unnamed_source";
   recency_cue: "fresh" | "recent" | "older" | "unknown";
   prioritization_cue: string;
+  created_at: string;
+};
+
+export type EvidenceArtifactRecord = {
+  id: string;
+  case_id: string;
+  evidence_link_id: string;
+  news_result_id: string;
+  artifact_type: EvidenceArtifactType;
+  display_name: string;
+  storage_path: string;
+  media_type: string;
+  byte_size: number;
+  content_hash: string;
+  source_url: string;
+  captured_at: string;
+  retention_policy: string;
+  availability: EvidenceArtifactAvailability;
+  capture_note: string;
   created_at: string;
 };
 

@@ -125,6 +125,22 @@ function sortLabel(sort: ResultSort) {
   return "Retrieved newest";
 }
 
+function artifactLabel(type: string) {
+  if (type === "source_url") {
+    return "Source URL";
+  }
+  if (type === "html_snapshot") {
+    return "HTML snapshot";
+  }
+  if (type === "text_snapshot") {
+    return "Text snapshot";
+  }
+  if (type === "screenshot") {
+    return "Screenshot";
+  }
+  return type.replaceAll("_", " ");
+}
+
 function makeInitialQuery(dashboard: FraudMonitorDashboardData): ResultQuery {
   return {
     search: dashboard.result_page.search,
@@ -200,6 +216,10 @@ export function FraudMonitorDashboard({
   }, [dashboard.providers, dashboard.results]);
   const visibleResultIds = useMemo(() => dashboard.results.map((result) => result.id), [dashboard.results]);
   const selectedVisibleCount = selectedResultIds.filter((id) => visibleResultIds.includes(id)).length;
+  const totalAvailableArtifacts = dashboard.results.reduce(
+    (total, result) => total + result.available_artifact_count,
+    0,
+  );
   const showDetailedProvider = !dashboard.providers.some((provider) => provider.name === dashboard.detailed_provider.name);
   const runDisabled =
     isRunning ||
@@ -547,6 +567,7 @@ export function FraudMonitorDashboard({
           <Metric label="Pending review" value={dashboard.pending_results} detail="Needs analyst decision" />
           <Metric label="Relevant" value={dashboard.relevant_results} detail="Marked useful" />
           <Metric label="Evidence links" value={dashboard.evidence_count} detail="Saved source records" />
+          <Metric label="Vault artifacts" value={totalAvailableArtifacts} detail="Available on this page" />
         </section>
 
         <div className="fm-control-grid">
@@ -822,6 +843,11 @@ export function FraudMonitorDashboard({
                       <span className={result.saved_as_evidence ? "oc-badge oc-badge-success" : "oc-badge oc-badge-muted"}>
                         {result.saved_as_evidence ? "Evidence saved" : "Unsaved"}
                       </span>
+                      <span className={result.available_artifact_count > 0 ? "oc-badge oc-badge-success" : "oc-badge oc-badge-muted"}>
+                        {result.available_artifact_count > 0
+                          ? `${result.available_artifact_count} vault artifact(s)`
+                          : "No local artifact"}
+                      </span>
                       {result.duplicate_count > 0 ? (
                         <span className="oc-badge oc-badge-medium">Seen {result.seen_count} times</span>
                       ) : null}
@@ -858,6 +884,31 @@ export function FraudMonitorDashboard({
                     Open source
                   </a>
                 </div>
+                {result.saved_as_evidence ? (
+                  <div className="fm-artifact-list" aria-label="Evidence vault artifacts">
+                    {result.evidence_artifacts.length === 0 ? (
+                      <p className="oc-empty-state">Vault metadata has not been captured for this saved source.</p>
+                    ) : null}
+                    {result.evidence_artifacts.map((artifact) => (
+                      <div className="fm-artifact-row" key={artifact.id}>
+                        <div>
+                          <strong>{artifactLabel(artifact.artifact_type)}</strong>
+                          <p>
+                            {artifact.availability === "available"
+                              ? artifact.storage_path || artifact.source_url
+                              : artifact.capture_note}
+                          </p>
+                          {artifact.content_hash ? (
+                            <p className="oc-technical">sha256:{artifact.content_hash.slice(0, 16)}</p>
+                          ) : null}
+                        </div>
+                        <span className={artifact.availability === "available" ? "oc-badge oc-badge-success" : "oc-badge oc-badge-muted"}>
+                          {artifact.availability.replace("_", " ")}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
                 <div className="oc-row-actions">
                   {(["pending", "relevant", "not_relevant"] as NewsReviewStatus[]).map((status) => (
                     <button

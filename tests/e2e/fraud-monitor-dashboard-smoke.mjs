@@ -161,13 +161,22 @@ async function main() {
     await expectVisible(page.getByText("Reported state: Unknown"), "reported state badge");
     await expectVisible(page.getByText("fixture.example/public-fraud-reporting"), "short source location");
 
-    const sourceHref = await page
+    const sourceHrefs = await page
       .getByRole("link", { name: "Open source" })
-      .first()
-      .getAttribute("href");
-    if (sourceHref !== "https://fixture.example/public-fraud-reporting") {
-      throw new Error(`Expected first source link to preserve URL, got ${sourceHref}`);
+      .evaluateAll((links) => links.map((link) => link.getAttribute("href")));
+    if (!sourceHrefs.includes("https://fixture.example/public-fraud-reporting")) {
+      throw new Error(`Expected source links to preserve fixture URL, got ${sourceHrefs.join(", ")}`);
     }
+    await Promise.all([
+      page.waitForResponse(
+        (response) => response.url().includes("/api/backend/fraud-monitor/results/") && response.status() < 500,
+      ),
+      page.getByRole("button", { name: "Save evidence" }).first().click(),
+    ]);
+    await expectVisible(page.getByText("Evidence link saved."), "evidence saved notice");
+    await expectVisible(page.getByText("2 vault artifact(s)"), "vault artifact badge");
+    await expectVisible(page.getByText("Text snapshot"), "text snapshot artifact");
+    await expectVisible(page.getByText("Source URL"), "source URL artifact");
 
     await page.getByLabel("Search").fill("Agency");
     await Promise.all([
