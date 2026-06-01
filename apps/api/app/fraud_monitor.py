@@ -195,6 +195,7 @@ class FraudMonitorEvidenceTableRow(BaseModel):
     source_url: str
     provider: str
     review_status: ReviewStatus
+    classification_label: str
     analyst_note: str
     retrieved_at: str
     published_at: str
@@ -524,10 +525,22 @@ def build_result_filters(
                 OR LOWER(news_results.publisher) LIKE ?
                 OR LOWER(news_results.source_url) LIKE ?
                 OR LOWER(news_results.theme) LIKE ?
+                OR LOWER(news_results.classification_label) LIKE ?
+                OR LOWER(news_results.classification_terms_json) LIKE ?
             )"""
         )
         search_param = f"%{cleaned_search.lower()}%"
-        params.extend([search_param, search_param, search_param, search_param, search_param])
+        params.extend(
+            [
+                search_param,
+                search_param,
+                search_param,
+                search_param,
+                search_param,
+                search_param,
+                search_param,
+            ]
+        )
     if review_filter != "all":
         clauses.append("news_results.review_status = ?")
         params.append(review_filter)
@@ -972,6 +985,7 @@ def build_export_bundle() -> FraudMonitorExportBundle:
                 source_url=result["source_url"],
                 provider=result["provider"],
                 review_status=result["review_status"],
+                classification_label=result["classification_label"],
                 analyst_note=result["evidence_analyst_note"],
                 retrieved_at=result["retrieved_at"],
                 published_at=result["published_at"],
@@ -1080,10 +1094,20 @@ def export_bundle_to_markdown(bundle: FraudMonitorExportBundle) -> str:
     if bundle.evidence_table:
         lines.extend(
             markdown_table(
-                ["Title", "Source URL", "Provider", "Review", "Analyst note", "Retrieved", "Published"],
+                [
+                    "Title",
+                    "Reported category",
+                    "Source URL",
+                    "Provider",
+                    "Review",
+                    "Analyst note",
+                    "Retrieved",
+                    "Published",
+                ],
                 [
                     [
                         row.title,
+                        row.classification_label,
                         row.source_url,
                         row.provider,
                         row.review_status,

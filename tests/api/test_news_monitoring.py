@@ -29,6 +29,17 @@ def create_case(client: TestClient) -> dict:
     return response.json()
 
 
+def test_classification_prefers_title_before_snippet() -> None:
+    label, basis, terms = news_monitoring.classify_public_result(
+        "XYZ was charged for lending fraud",
+        "The public report also mentioned phishing warnings.",
+    )
+
+    assert label == "lending fraud"
+    assert basis == "title"
+    assert terms == ["lending fraud"]
+
+
 def test_keyword_sets_require_public_interest_terms(tmp_path: Path, monkeypatch) -> None:
     with make_client(tmp_path, monkeypatch) as client:
         case = create_case(client)
@@ -73,7 +84,7 @@ def test_news_scan_stores_results_queue_evidence_trends_and_persists(
                 keyword=keyword,
                 source_url=f"https://news.example/{keyword.replace(' ', '-')}-1",
                 publisher="Example News",
-                title=f"Consumer warning about {keyword}",
+                title=f"Consumer warning about lending fraud tied to {keyword}",
                 snippet="Police reported a repeated fraud theme in public alerts.",
                 published_at="2026-05-29T10:00:00Z",
                 retrieved_at="2026-05-30T12:00:00Z",
@@ -118,6 +129,11 @@ def test_news_scan_stores_results_queue_evidence_trends_and_persists(
         assert run["results"][0]["saved_as_evidence"] is False
         assert run["results"][0]["source_quality"] == "named_source"
         assert run["results"][0]["recency_cue"] in {"fresh", "recent"}
+        classified_result = next(
+            result for result in run["results"] if result["classification_label"] == "lending fraud"
+        )
+        assert classified_result["classification_basis"] == "title"
+        assert classified_result["classification_terms"] == ["lending fraud"]
         assert "named source" in run["results"][0]["prioritization_cue"]
 
         results_response = client.get(f"/cases/{case['id']}/news-results")
@@ -148,7 +164,8 @@ def test_news_scan_stores_results_queue_evidence_trends_and_persists(
         assert trends_response.status_code == 200
         trends = trends_response.json()
         group_types = {group["group_type"] for group in trends["groups"]}
-        assert {"keyword", "source", "time_window", "theme"}.issubset(group_types)
+        assert {"keyword", "classification", "source", "time_window", "theme"}.issubset(group_types)
+        assert any(group["label"] == "lending fraud" for group in trends["groups"])
         assert all("analyst review required" in group["confidence_language"] for group in trends["groups"])
         assert all(group["priority_cue"] for group in trends["groups"])
 
@@ -159,6 +176,7 @@ def test_news_scan_stores_results_queue_evidence_trends_and_persists(
     assert len(persisted_results) == 4
     assert len(persisted_evidence) == 1
     assert persisted_evidence[0]["id"] == evidence["id"]
+    assert any(result["classification_label"] == "lending fraud" for result in persisted_results)
 
 
 def test_news_scan_records_partial_provider_failures(tmp_path: Path, monkeypatch) -> None:

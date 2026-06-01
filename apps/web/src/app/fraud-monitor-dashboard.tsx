@@ -89,6 +89,16 @@ function providerLabel(provider: string) {
   return provider.replaceAll("_", " ");
 }
 
+function sourceSummary(sourceUrl: string): string {
+  try {
+    const parsed = new URL(sourceUrl);
+    const path = parsed.pathname === "/" ? "" : parsed.pathname;
+    return `${parsed.hostname}${path}`.slice(0, 96);
+  } catch {
+    return sourceUrl;
+  }
+}
+
 function trendLabel(group: TrendGroup) {
   return `${group.group_type.replaceAll("_", " ")}: ${group.label}`;
 }
@@ -640,7 +650,7 @@ export function FraudMonitorDashboard({
               <input
                 className="oc-input"
                 onChange={(event) => setSearchDraft(event.target.value)}
-                placeholder="Title, source, URL, theme"
+                placeholder="Title, source, category, theme"
                 value={searchDraft}
               />
             </label>
@@ -759,7 +769,7 @@ export function FraudMonitorDashboard({
             {dashboard.results.map((result) => (
               <article className="oc-panel fm-result" key={result.id}>
                 <div className="fm-result-header">
-                  <label className="fm-select-result" aria-label={`Select ${result.title || result.source_url}`}>
+                  <label className="fm-select-result" aria-label={`Select ${result.title || sourceSummary(result.source_url)}`}>
                     <input
                       checked={selectedResultIds.includes(result.id)}
                       onChange={() => toggleResultSelection(result.id)}
@@ -779,8 +789,9 @@ export function FraudMonitorDashboard({
                       <span className={result.source_quality === "named_source" ? "oc-badge oc-badge-success" : "oc-badge oc-badge-muted"}>
                         {result.source_quality === "named_source" ? "Named source" : "Source review"}
                       </span>
+                      <span className="oc-badge oc-badge-info">Reported category: {result.classification_label}</span>
                     </div>
-                    <h3>{result.title || result.source_url}</h3>
+                    <h3>{result.title || sourceSummary(result.source_url)}</h3>
                   </div>
                   <span className={statusClass(result.review_status)}>
                     {result.review_status.replace("_", " ")}
@@ -792,12 +803,13 @@ export function FraudMonitorDashboard({
                   <span>Provider {result.provider ? providerLabel(result.provider) : "unknown"}</span>
                   <span>Retrieved {compactDate(result.retrieved_at)}</span>
                   <span>Theme {result.theme || "uncategorized"}</span>
+                  <span>Basis {result.classification_basis}</span>
                 </div>
                 <p className="oc-empty-state">{result.prioritization_cue}</p>
                 <div className="fm-source-row">
-                  <a className="oc-technical" href={result.source_url} rel="noreferrer noopener" target="_blank">
-                    {result.source_url}
-                  </a>
+                  <span className="oc-technical" title={result.source_url}>
+                    {sourceSummary(result.source_url)}
+                  </span>
                   <a className="oc-btn oc-btn-sm" href={result.source_url} rel="noreferrer noopener" target="_blank">
                     Open source
                   </a>

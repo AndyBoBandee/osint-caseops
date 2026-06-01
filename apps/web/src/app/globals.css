@@ -162,6 +162,7 @@
 .fm-bulk-row,
 .fm-pagination-row,
 .fm-source-row,
+.oc-source-row,
 .fm-note-row,
 .fm-result-badges {
   display: flex;
@@ -177,14 +178,20 @@
 }
 
 .fm-source-row,
+.oc-source-row,
 .fm-note-row {
   align-items: flex-end;
 }
 
 .fm-source-row .oc-technical,
+.oc-source-row .oc-technical,
 .fm-note-row .oc-field {
   flex: 1;
   min-width: 0;
+}
+
+.oc-source-row {
+  flex-wrap: wrap;
 }
 
 .fm-result-badges {

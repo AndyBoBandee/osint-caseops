@@ -128,6 +128,9 @@ def initialize_database() -> None:
                 seen_count INTEGER NOT NULL DEFAULT 1,
                 last_seen_at TEXT NOT NULL DEFAULT '',
                 theme TEXT NOT NULL DEFAULT '',
+                classification_label TEXT NOT NULL DEFAULT 'general fraud reporting',
+                classification_basis TEXT NOT NULL DEFAULT 'fallback',
+                classification_terms_json TEXT NOT NULL DEFAULT '[]',
                 created_at TEXT NOT NULL,
                 UNIQUE(case_id, source_url, keyword)
             );
@@ -209,6 +212,24 @@ def initialize_database() -> None:
             "news_results",
             "last_seen_at",
             "TEXT NOT NULL DEFAULT ''",
+        )
+        ensure_column(
+            connection,
+            "news_results",
+            "classification_label",
+            "TEXT NOT NULL DEFAULT 'general fraud reporting'",
+        )
+        ensure_column(
+            connection,
+            "news_results",
+            "classification_basis",
+            "TEXT NOT NULL DEFAULT 'fallback'",
+        )
+        ensure_column(
+            connection,
+            "news_results",
+            "classification_terms_json",
+            "TEXT NOT NULL DEFAULT '[]'",
         )
 
 

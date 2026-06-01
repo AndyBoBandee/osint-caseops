@@ -374,7 +374,7 @@ def test_exports_include_reviewed_results_metadata_trends_and_escaped_markdown(
                 keyword=keyword,
                 source_url="https://gdelt.example/fraud-report",
                 publisher="GDELT | Example",
-                title="Agency | fraud\nwarning",
+                title="Agency | charged lending fraud\nwarning",
                 snippet="Public reporting describes a fraud pattern for analyst review.",
                 published_at="2026-05-30T12:00:00Z",
                 retrieved_at="2026-05-30T12:05:00Z",
@@ -407,13 +407,16 @@ def test_exports_include_reviewed_results_metadata_trends_and_escaped_markdown(
     assert bundle["evidence_table"][0]["source_url"] == "https://gdelt.example/fraud-report"
     assert bundle["evidence_table"][0]["provider"] == "gdelt"
     assert bundle["evidence_table"][0]["review_status"] == "relevant"
+    assert bundle["evidence_table"][0]["classification_label"] == "lending fraud"
     assert bundle["evidence_table"][0]["analyst_note"] == "Analyst | note\nwith newline."
-    assert bundle["reviewed_results"][0]["title"] == "Agency | fraud\nwarning"
+    assert bundle["reviewed_results"][0]["title"] == "Agency | charged lending fraud\nwarning"
+    assert bundle["reviewed_results"][0]["classification_label"] == "lending fraud"
     assert any("analyst review required" in group["confidence_language"] for group in bundle["trend_summary"]["groups"])
 
     assert markdown_response.status_code == 200
     assert markdown_response.headers["content-disposition"] == 'attachment; filename="fraud-monitor-export.md"'
-    assert "Agency \\| fraud warning" in markdown_response.text
+    assert "Agency \\| charged lending fraud warning" in markdown_response.text
+    assert "lending fraud" in markdown_response.text
     assert "Analyst \\| note with newline." in markdown_response.text
     assert "Public results are leads for analyst review" in markdown_response.text
 
@@ -431,7 +434,7 @@ def test_review_operations_search_pagination_bulk_notes_and_duplicates(
                     keyword=keyword,
                     source_url=f"https://{provider}.example/fraud-{source_index}",
                     publisher="Priority Source" if index % 2 == 0 else "Routine Source",
-                    title=f"{'Priority' if index % 2 == 0 else 'Routine'} fraud report {index:02d}",
+                    title=f"{'Priority' if index % 2 == 0 else 'Routine'} lending fraud report {index:02d}",
                     snippet="Public reporting describes fraud patterns requiring analyst review.",
                     published_at=f"2026-05-{30 - (index % 5):02d}T12:00:00Z",
                     retrieved_at=f"2026-05-30T12:{index:02d}:00Z",
@@ -446,6 +449,7 @@ def test_review_operations_search_pagination_bulk_notes_and_duplicates(
         first_page_response = client.get("/fraud-monitor/dashboard?limit=5&sort=title_asc")
         second_page_response = client.get("/fraud-monitor/dashboard?limit=5&offset=5")
         search_response = client.get("/fraud-monitor/dashboard?search=priority&limit=100")
+        classification_search_response = client.get("/fraud-monitor/dashboard?search=lending&limit=100")
         all_response = client.get("/fraud-monitor/dashboard?limit=100")
 
         assert run_response.status_code == 200
@@ -462,6 +466,10 @@ def test_review_operations_search_pagination_bulk_notes_and_duplicates(
         assert second_page["result_page"]["has_previous"] is True
         assert len(second_page["results"]) == 5
         assert {result["publisher"] for result in search_page["results"]} == {"Priority Source"}
+        assert classification_search_response.json()["result_page"]["total_matching"] == 11
+        assert {result["classification_label"] for result in classification_search_response.json()["results"]} == {
+            "lending fraud"
+        }
         assert any(result["duplicate_count"] == 1 and result["seen_count"] == 2 for result in all_page["results"])
 
         selected_ids = [result["id"] for result in first_page["results"][:2]]

@@ -235,3 +235,33 @@ Verification:
   configuration, review, evidence, and export controls.
 - Documentation review confirms the legacy path is labeled as legacy and current
   next work follows the Fraud Monitor milestones.
+
+## Milestone 9: Source Clarity And Result Classification
+
+Status: Planned.
+
+Deliverables:
+
+- Analyst-ready source cards that foreground title, publisher, reported category,
+  short source location, review status, and evidence state.
+- Built-in deterministic fraud-type taxonomy for stored public results.
+- Title-first classification with snippet fallback and safe general fraud
+  reporting default.
+- Classification fields in stored results, dashboard search, trend groups, and
+  Markdown/JSON exports.
+
+Acceptance:
+
+- User can understand a result without reading a raw source URL first.
+- A title such as "charged for lending fraud" labels the source as lending fraud.
+- Classification language remains a reported source category, not an automated
+  fraud verdict.
+- Existing local databases receive safe default classification values.
+
+Verification:
+
+- API tests cover taxonomy matching, persistence, dashboard search, trend
+  grouping, and export fields.
+- Rendered QA verifies source cards are readable and source opening remains
+  available.
+- `make test-fast`, `make check`, and `make smoke` pass.

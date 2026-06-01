@@ -189,6 +189,9 @@ Fields:
 - saved_as_evidence.
 - evidence_link_id.
 - theme.
+- classification_label.
+- classification_basis.
+- classification_terms.
 - created_at.
 
 ## Evidence Link

@@ -60,7 +60,7 @@ export type EnrichmentRunRecord = {
 
 export type NewsReviewStatus = "pending" | "relevant" | "not_relevant";
 export type NewsRunStatus = "success" | "partial" | "failed";
-export type TrendGroupType = "keyword" | "source" | "time_window" | "theme";
+export type TrendGroupType = "keyword" | "classification" | "source" | "time_window" | "theme";
 
 export type NewsKeywordSet = {
   id: string;
@@ -91,6 +91,9 @@ export type NewsResultRecord = {
   seen_count: number;
   duplicate_count: number;
   theme: string;
+  classification_label: string;
+  classification_basis: "title" | "snippet" | "fallback";
+  classification_terms: string[];
   source_quality: "named_source" | "unnamed_source";
   recency_cue: "fresh" | "recent" | "older" | "unknown";
   prioritization_cue: string;

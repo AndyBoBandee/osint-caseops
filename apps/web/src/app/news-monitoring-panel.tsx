@@ -58,6 +58,16 @@ function trendTypeLabel(value: string) {
   return value.replaceAll("_", " ");
 }
 
+function sourceSummary(sourceUrl: string): string {
+  try {
+    const parsed = new URL(sourceUrl);
+    const path = parsed.pathname === "/" ? "" : parsed.pathname;
+    return `${parsed.hostname}${path}`.slice(0, 96);
+  } catch {
+    return sourceUrl;
+  }
+}
+
 function visibleTrendGroups(trendSummary: TrendSummary | null): TrendSummary["groups"] {
   if (!trendSummary) {
     return [];
@@ -66,6 +76,7 @@ function visibleTrendGroups(trendSummary: TrendSummary | null): TrendSummary["gr
   const selected = new Map<string, TrendSummary["groups"][number]>();
   const requiredTypes: TrendSummary["groups"][number]["group_type"][] = [
     "keyword",
+    "classification",
     "source",
     "time_window",
     "theme",
@@ -226,7 +237,7 @@ export function NewsMonitoringPanel({
                   <div className="oc-news-result-header">
                     <div>
                       <span className="oc-badge oc-badge-muted">{result.keyword}</span>
-                      <h3>{result.title || result.source_url}</h3>
+                      <h3>{result.title || sourceSummary(result.source_url)}</h3>
                     </div>
                     <span className={reviewBadgeClass(result.review_status)}>
                       {result.review_status.replace("_", " ")}
@@ -235,15 +246,21 @@ export function NewsMonitoringPanel({
                   <p>{result.snippet || "No snippet returned by the public provider."}</p>
                   <div className="oc-case-meta">
                     <span>{result.publisher || "Unknown publisher"}</span>
+                    <span>Reported category {result.classification_label}</span>
                     {result.published_at ? <span>Published {result.published_at}</span> : null}
                     <span>Retrieved {result.retrieved_at}</span>
                     <span>{result.recency_cue}</span>
                     <span>{result.source_quality.replace("_", " ")}</span>
                   </div>
                   <p className="oc-empty-state">{result.prioritization_cue}</p>
-                  <a className="oc-technical" href={result.source_url} rel="noreferrer" target="_blank">
-                    {result.source_url}
-                  </a>
+                  <div className="oc-source-row">
+                    <span className="oc-technical" title={result.source_url}>
+                      {sourceSummary(result.source_url)}
+                    </span>
+                    <a className="oc-btn oc-btn-sm" href={result.source_url} rel="noreferrer" target="_blank">
+                      Open source
+                    </a>
+                  </div>
                   <div className="oc-row-actions">
                     {(["pending", "relevant", "not_relevant"] as NewsReviewStatus[]).map(
                       (reviewStatus) => (

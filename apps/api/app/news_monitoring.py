@@ -20,9 +20,10 @@ from app.core.config import get_settings
 
 RunStatus = Literal["success", "partial", "failed"]
 ReviewStatus = Literal["pending", "relevant", "not_relevant"]
-TrendGroupType = Literal["keyword", "source", "time_window", "theme"]
+TrendGroupType = Literal["keyword", "classification", "source", "time_window", "theme"]
 SourceQuality = Literal["named_source", "unnamed_source"]
 RecencyCue = Literal["fresh", "recent", "older", "unknown"]
+ClassificationBasis = Literal["title", "snippet", "fallback"]
 
 NEWS_TIMEOUT_SECONDS = 8
 MAX_NEWS_BODY_BYTES = 512_000
@@ -62,6 +63,84 @@ STOP_WORDS = {
     "with",
     "your",
 }
+
+FRAUD_CLASSIFICATION_RULES: list[tuple[str, list[tuple[str, str]]]] = [
+    (
+        "lending fraud",
+        [
+            ("lending fraud", r"\blending fraud\b"),
+            ("loan fraud", r"\bloan fraud\b"),
+            ("mortgage fraud", r"\bmortgage fraud\b"),
+        ],
+    ),
+    (
+        "investment fraud",
+        [
+            ("investment fraud", r"\binvestment fraud\b"),
+            ("securities fraud", r"\bsecurities fraud\b"),
+            ("ponzi", r"\bponzi\b"),
+        ],
+    ),
+    ("insurance fraud", [("insurance fraud", r"\binsurance fraud\b")]),
+    (
+        "identity theft",
+        [
+            ("identity theft", r"\bidentity theft\b"),
+            ("stolen identity", r"\bstolen identit(?:y|ies)\b"),
+        ],
+    ),
+    (
+        "phishing or impersonation",
+        [
+            ("phishing", r"\bphishing\b"),
+            ("impersonation", r"\bimpersonation\b"),
+            ("impersonator", r"\bimpersonator\b"),
+            ("spoofing", r"\bspoof(?:ing)?\b"),
+        ],
+    ),
+    (
+        "healthcare fraud",
+        [
+            ("healthcare fraud", r"\bhealth ?care fraud\b"),
+            ("medicare fraud", r"\bmedicare fraud\b"),
+            ("medicaid fraud", r"\bmedicaid fraud\b"),
+        ],
+    ),
+    ("tax fraud", [("tax fraud", r"\btax fraud\b"), ("tax evasion", r"\btax evasion\b")]),
+    (
+        "wire or payment fraud",
+        [
+            ("wire fraud", r"\bwire fraud\b"),
+            ("payment fraud", r"\bpayment fraud\b"),
+            ("ach fraud", r"\bach fraud\b"),
+            ("credit card fraud", r"\bcredit card fraud\b"),
+        ],
+    ),
+    (
+        "crypto fraud",
+        [
+            ("crypto fraud", r"\bcrypto(?:currency)? fraud\b"),
+            ("bitcoin fraud", r"\bbitcoin fraud\b"),
+            ("token fraud", r"\btoken fraud\b"),
+        ],
+    ),
+    (
+        "procurement or contract fraud",
+        [
+            ("procurement fraud", r"\bprocurement fraud\b"),
+            ("contract fraud", r"\bcontract fraud\b"),
+            ("vendor fraud", r"\bvendor fraud\b"),
+        ],
+    ),
+    (
+        "charity fraud",
+        [
+            ("charity fraud", r"\bcharity fraud\b"),
+            ("fundraising fraud", r"\bfundraising fraud\b"),
+        ],
+    ),
+]
+GENERAL_FRAUD_LABEL = "general fraud reporting"
 
 router = APIRouter()
 
@@ -193,6 +272,9 @@ class NewsResultRecord(BaseModel):
     seen_count: int = 1
     duplicate_count: int = 0
     theme: str
+    classification_label: str
+    classification_basis: ClassificationBasis
+    classification_terms: list[str]
     source_quality: SourceQuality
     recency_cue: RecencyCue
     prioritization_cue: str
@@ -309,9 +391,13 @@ def row_to_news_result(row: sqlite3.Row) -> dict[str, Any]:
     payload["evidence_analyst_note"] = payload.get("evidence_analyst_note") or ""
     payload["seen_count"] = int(payload.get("seen_count") or 1)
     payload["duplicate_count"] = max(payload["seen_count"] - 1, 0)
+    payload["classification_label"] = payload.get("classification_label") or GENERAL_FRAUD_LABEL
+    payload["classification_basis"] = payload.get("classification_basis") or "fallback"
+    payload["classification_terms"] = decode_json_list(payload.get("classification_terms_json") or "[]")
     payload["source_quality"] = source_quality(payload)
     payload["recency_cue"] = recency_cue(payload.get("published_at") or payload.get("retrieved_at", ""))
     payload["prioritization_cue"] = prioritization_cue(payload)
+    payload.pop("classification_terms_json", None)
     return payload
 
 
@@ -352,6 +438,8 @@ def recency_cue(value: str) -> RecencyCue:
 
 def prioritization_cue(row: dict[str, Any]) -> str:
     parts: list[str] = []
+    if row["classification_label"] != GENERAL_FRAUD_LABEL:
+        parts.append(f"reported category: {row['classification_label']}")
     if row["recency_cue"] in {"fresh", "recent"}:
         parts.append(f"{row['recency_cue']} public result")
     else:
@@ -578,8 +666,8 @@ def search_fixture_news(keyword: str, max_results: int) -> list[ProviderResult]:
     retrieved_at = utc_now()
     templates = [
         (
-            "Public fraud reporting fixture",
-            "Public reporting describes a recurring fraud pattern for analyst review.",
+            "Public lending fraud reporting fixture",
+            "Public reporting describes a recurring lending fraud pattern for analyst review.",
             "https://fixture.example/public-fraud-reporting",
         ),
         (
@@ -641,6 +729,35 @@ def infer_theme(title: str, snippet: str) -> str:
     return " ".join(word for word, _ in common)
 
 
+def match_classification(text: str) -> tuple[str, list[str]] | None:
+    normalized = " ".join(text.lower().split())
+    if not normalized:
+        return None
+    for label, term_patterns in FRAUD_CLASSIFICATION_RULES:
+        matched_terms = [
+            term
+            for term, pattern in term_patterns
+            if re.search(pattern, normalized)
+        ]
+        if matched_terms:
+            return label, matched_terms
+    return None
+
+
+def classify_public_result(title: str, snippet: str) -> tuple[str, ClassificationBasis, list[str]]:
+    title_match = match_classification(title)
+    if title_match:
+        label, terms = title_match
+        return label, "title", terms
+
+    snippet_match = match_classification(snippet)
+    if snippet_match:
+        label, terms = snippet_match
+        return label, "snippet", terms
+
+    return GENERAL_FRAUD_LABEL, "fallback", []
+
+
 def store_news_results(
     connection: sqlite3.Connection,
     case_id: str,
@@ -652,6 +769,10 @@ def store_news_results(
         result_id = str(uuid4())
         created_at = utc_now()
         theme = infer_theme(result.title, result.snippet)
+        classification_label, classification_basis, classification_terms = classify_public_result(
+            result.title,
+            result.snippet,
+        )
         connection.execute(
             """
             INSERT INTO news_results (
@@ -668,9 +789,12 @@ def store_news_results(
                 seen_count,
                 last_seen_at,
                 theme,
+                classification_label,
+                classification_basis,
+                classification_terms_json,
                 created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(case_id, source_url, keyword) DO UPDATE SET
                 run_id = excluded.run_id,
                 publisher = excluded.publisher,
@@ -680,7 +804,10 @@ def store_news_results(
                 retrieved_at = excluded.retrieved_at,
                 seen_count = news_results.seen_count + 1,
                 last_seen_at = excluded.last_seen_at,
-                theme = excluded.theme
+                theme = excluded.theme,
+                classification_label = excluded.classification_label,
+                classification_basis = excluded.classification_basis,
+                classification_terms_json = excluded.classification_terms_json
             """,
             (
                 result_id,
@@ -695,6 +822,9 @@ def store_news_results(
                 result.retrieved_at,
                 result.retrieved_at,
                 theme,
+                classification_label,
+                classification_basis,
+                json.dumps(classification_terms),
                 created_at,
             ),
         )
@@ -1170,6 +1300,7 @@ def get_news_trends(case_id: str) -> TrendSummary:
     group_rows: list[TrendGroup] = []
     for group_type, key_fn in (
         ("keyword", lambda row: row["keyword"]),
+        ("classification", lambda row: row["classification_label"] or GENERAL_FRAUD_LABEL),
         ("source", lambda row: row["publisher"] or "unknown source"),
         ("time_window", lambda row: bucket_time(row["published_at"] or row["retrieved_at"])),
         ("theme", lambda row: row["theme"] or "general public reporting"),
