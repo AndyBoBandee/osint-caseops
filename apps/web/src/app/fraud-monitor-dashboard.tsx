@@ -5,6 +5,9 @@ import { useMemo, useState } from "react";
 import { apiRequest } from "./case-api";
 import {
   EvidenceFilter,
+  FindingConfidence,
+  FindingRecord,
+  FindingStatus,
   FraudMonitorDashboardData,
   FraudMonitorJob,
   NewsResultRecord,
@@ -36,18 +39,19 @@ type ResultQuery = {
 };
 
 function statusClass(status: string) {
-  if (status === "success" || status === "ready" || status === "relevant") {
+  if (status === "success" || status === "ready" || status === "relevant" || status === "active") {
     return "oc-badge oc-badge-success";
   }
   if (
     status === "partial" ||
     status === "missing_config" ||
     status === "partial_success" ||
-    status === "pending"
+    status === "pending" ||
+    status === "draft"
   ) {
     return "oc-badge oc-badge-medium";
   }
-  if (status === "not_relevant") {
+  if (status === "not_relevant" || status === "resolved" || status === "archived") {
     return "oc-badge oc-badge-muted";
   }
   return "oc-badge oc-badge-danger";
@@ -194,6 +198,14 @@ export function FraudMonitorDashboard({
   const [resultSort, setResultSort] = useState<ResultSort>(initialDashboard.result_page.sort);
   const [resultLimit, setResultLimit] = useState(initialDashboard.result_page.limit);
   const [evidenceNotes, setEvidenceNotes] = useState<Record<string, string>>({});
+  const [findingDraft, setFindingDraft] = useState({
+    title: "",
+    summary: "",
+    confidence: "unknown" as FindingConfidence,
+    status: "draft" as FindingStatus,
+    analyst_notes: "",
+    evidence_link_ids: [] as string[],
+  });
   const [selectedResultIds, setSelectedResultIds] = useState<string[]>([]);
   const [bulkReviewStatus, setBulkReviewStatus] = useState<NewsReviewStatus>("relevant");
   const [intervalDraft, setIntervalDraft] = useState(
@@ -219,6 +231,9 @@ export function FraudMonitorDashboard({
   const totalAvailableArtifacts = dashboard.results.reduce(
     (total, result) => total + result.available_artifact_count,
     0,
+  );
+  const savedEvidenceOptions = dashboard.results.filter(
+    (result) => result.saved_as_evidence && result.evidence_link_id,
   );
   const showDetailedProvider = !dashboard.providers.some((provider) => provider.name === dashboard.detailed_provider.name);
   const runDisabled =
@@ -491,6 +506,38 @@ export function FraudMonitorDashboard({
     }
   }
 
+  function toggleFindingEvidence(evidenceLinkId: string, checked: boolean) {
+    setFindingDraft((current) => ({
+      ...current,
+      evidence_link_ids: checked
+        ? Array.from(new Set([...current.evidence_link_ids, evidenceLinkId]))
+        : current.evidence_link_ids.filter((id) => id !== evidenceLinkId),
+    }));
+  }
+
+  async function createFinding() {
+    setNotice("");
+    setError("");
+    try {
+      const finding = await apiRequest<FindingRecord>("/fraud-monitor/findings", {
+        method: "POST",
+        body: JSON.stringify(findingDraft),
+      });
+      await refreshDashboard();
+      setFindingDraft({
+        title: "",
+        summary: "",
+        confidence: "unknown",
+        status: "draft",
+        analyst_notes: "",
+        evidence_link_ids: [],
+      });
+      setNotice(`Finding saved: ${finding.title}`);
+    } catch (caught) {
+      setError(getRequestError(caught, "Could not save finding."));
+    }
+  }
+
   return (
     <div className="oc-app fm-app" data-theme="dark">
       <aside className="fm-rail" aria-label="Fraud monitor navigation">
@@ -504,6 +551,12 @@ export function FraudMonitorDashboard({
           </a>
           <a className="oc-nav-link" href="#results">
             Results
+          </a>
+          <a className="oc-nav-link" href="#findings">
+            Findings
+          </a>
+          <a className="oc-nav-link" href="#timeline">
+            Timeline
           </a>
           <a className="oc-nav-link" href="#jobs">
             Jobs
@@ -567,6 +620,7 @@ export function FraudMonitorDashboard({
           <Metric label="Pending review" value={dashboard.pending_results} detail="Needs analyst decision" />
           <Metric label="Relevant" value={dashboard.relevant_results} detail="Marked useful" />
           <Metric label="Evidence links" value={dashboard.evidence_count} detail="Saved source records" />
+          <Metric label="Findings" value={dashboard.findings.length} detail="Analyst-authored claims" />
           <Metric label="Vault artifacts" value={totalAvailableArtifacts} detail="Available on this page" />
         </section>
 
@@ -977,6 +1031,173 @@ export function FraudMonitorDashboard({
             >
               Next
             </button>
+          </div>
+        </section>
+
+        <section className="oc-card fm-panel" id="findings">
+          <div className="oc-card-header">
+            <div>
+              <h2 className="oc-card-title">Findings workspace</h2>
+              <p className="oc-card-description">Analyst-authored findings linked to saved evidence.</p>
+            </div>
+            <span className="oc-badge oc-badge-info">{dashboard.findings.length} finding(s)</span>
+          </div>
+          <div className="fm-finding-layout">
+            <div className="fm-finding-form">
+              <label className="oc-field">
+                <span className="oc-label">Title</span>
+                <input
+                  className="oc-input"
+                  onChange={(event) => setFindingDraft((current) => ({ ...current, title: event.target.value }))}
+                  placeholder="Analyst finding title"
+                  value={findingDraft.title}
+                />
+              </label>
+              <label className="oc-field">
+                <span className="oc-label">Summary</span>
+                <textarea
+                  className="oc-input fm-note-input"
+                  onChange={(event) => setFindingDraft((current) => ({ ...current, summary: event.target.value }))}
+                  placeholder="Careful summary based on reviewed sources"
+                  value={findingDraft.summary}
+                />
+              </label>
+              <div className="fm-filter-row">
+                <label className="oc-field">
+                  <span className="oc-label">Confidence</span>
+                  <select
+                    className="oc-input"
+                    onChange={(event) =>
+                      setFindingDraft((current) => ({
+                        ...current,
+                        confidence: event.target.value as FindingConfidence,
+                      }))
+                    }
+                    value={findingDraft.confidence}
+                  >
+                    <option value="unknown">Unknown</option>
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                  </select>
+                </label>
+                <label className="oc-field">
+                  <span className="oc-label">Status</span>
+                  <select
+                    className="oc-input"
+                    onChange={(event) =>
+                      setFindingDraft((current) => ({
+                        ...current,
+                        status: event.target.value as FindingStatus,
+                      }))
+                    }
+                    value={findingDraft.status}
+                  >
+                    <option value="draft">Draft</option>
+                    <option value="active">Active</option>
+                    <option value="resolved">Resolved</option>
+                    <option value="archived">Archived</option>
+                  </select>
+                </label>
+              </div>
+              <label className="oc-field">
+                <span className="oc-label">Analyst notes</span>
+                <textarea
+                  className="oc-input fm-note-input"
+                  onChange={(event) =>
+                    setFindingDraft((current) => ({ ...current, analyst_notes: event.target.value }))
+                  }
+                  placeholder="Reasoning, caveats, or follow-up"
+                  value={findingDraft.analyst_notes}
+                />
+              </label>
+              <div className="fm-artifact-list" aria-label="Finding evidence links">
+                {savedEvidenceOptions.length === 0 ? (
+                  <p className="oc-empty-state">Save a reviewed result as evidence before linking a finding.</p>
+                ) : null}
+                {savedEvidenceOptions.map((result) => (
+                  <label className="oc-check-row" key={result.evidence_link_id ?? result.id}>
+                    <input
+                      checked={findingDraft.evidence_link_ids.includes(result.evidence_link_id ?? "")}
+                      onChange={(event) =>
+                        result.evidence_link_id
+                          ? toggleFindingEvidence(result.evidence_link_id, event.target.checked)
+                          : undefined
+                      }
+                      type="checkbox"
+                    />
+                    {result.title || sourceSummary(result.source_url)}
+                  </label>
+                ))}
+              </div>
+              <button
+                className="oc-btn oc-btn-primary"
+                disabled={!findingDraft.title.trim() || !findingDraft.summary.trim()}
+                onClick={() => void createFinding()}
+                type="button"
+              >
+                Save finding
+              </button>
+            </div>
+            <div className="fm-finding-list">
+              {dashboard.findings.length === 0 ? (
+                <p className="oc-empty-state">No analyst findings have been saved yet.</p>
+              ) : null}
+              {dashboard.findings.map((finding) => (
+                <article className="oc-panel fm-finding" key={finding.id}>
+                  <div className="fm-result-header">
+                    <div>
+                      <div className="fm-result-badges">
+                        <span className="oc-badge oc-badge-info">Confidence {finding.confidence}</span>
+                        <span className={statusClass(finding.status)}>{finding.status}</span>
+                      </div>
+                      <h3>{finding.title}</h3>
+                    </div>
+                  </div>
+                  <p>{finding.summary}</p>
+                  {finding.analyst_notes ? <p className="oc-empty-state">{finding.analyst_notes}</p> : null}
+                  <div className="fm-artifact-list">
+                    {finding.linked_evidence.length === 0 ? (
+                      <p className="oc-empty-state">No evidence linked.</p>
+                    ) : null}
+                    {finding.linked_evidence.map((evidence) => (
+                      <div className="fm-artifact-row" key={evidence.id}>
+                        <div>
+                          <strong>{evidence.title}</strong>
+                          <p>{sourceSummary(evidence.source_url)}</p>
+                        </div>
+                        <span className="oc-badge oc-badge-info">
+                          {evidence.available_artifact_count} artifact(s)
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="oc-card fm-panel" id="timeline">
+          <div className="oc-card-header">
+            <div>
+              <h2 className="oc-card-title">Timeline</h2>
+              <p className="oc-card-description">Activity history for scans, review, evidence, findings, and exports.</p>
+            </div>
+          </div>
+          <div className="oc-timeline">
+            {dashboard.timeline_events.length === 0 ? (
+              <p className="oc-empty-state">No timeline events are available yet.</p>
+            ) : null}
+            {dashboard.timeline_events.map((event) => (
+              <div className="oc-timeline-item" key={event.id}>
+                <div className="oc-timeline-title">{event.title}</div>
+                <div className="oc-timeline-meta">
+                  {compactDate(event.created_at)} · {event.event_type.replaceAll("_", " ")}
+                </div>
+                {event.summary ? <p>{event.summary}</p> : null}
+              </div>
+            ))}
           </div>
         </section>
 

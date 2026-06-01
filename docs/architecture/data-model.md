@@ -1,8 +1,9 @@
 # Data Model
 
 The active product path is Fraud Monitor. News runs, news results, evidence links, monitor settings,
-jobs, provider validation, and local exports are the current data surface. The broader case/entity/
-finding/relationship/timeline model is legacy reference direction unless explicitly reintroduced.
+jobs, provider validation, analyst-authored findings, timeline events, and local exports are the
+current data surface. The broader case/entity/relationship graph model remains legacy reference
+direction unless explicitly reintroduced.
 
 ## Case
 
@@ -71,7 +72,8 @@ Evidence should support linking to multiple entities and findings through join t
 
 ## Finding
 
-Represents an analyst claim or generated observation.
+Represents an analyst-authored Fraud Monitor finding linked to reviewed evidence. Findings are not
+automated fraud verdicts; they preserve human summary, confidence, status, and notes.
 
 Fields:
 
@@ -80,12 +82,10 @@ Fields:
 - title.
 - summary.
 - confidence.
-- severity.
-- source_count.
-- manual_verification_status.
+- status.
+- analyst_notes.
 - created_at.
 - updated_at.
-- analyst_notes.
 
 Confidence values:
 
@@ -94,13 +94,15 @@ Confidence values:
 - low.
 - unknown.
 
-Severity values:
+Status values:
 
-- informational.
-- low.
-- medium.
-- high.
-- critical.
+- draft.
+- active.
+- resolved.
+- archived.
+
+Finding evidence links are stored in `finding_evidence_links` with `finding_id`,
+`evidence_link_id`, and `created_at`.
 
 ## Relationship
 
@@ -204,8 +206,7 @@ state is unknown. It is not an analyst-confirmed assertion about where fraud occ
 
 ## Evidence Link
 
-Represents a milestone 4 source-link evidence record saved from the news review queue. Full evidence
-artifacts arrive in the evidence capture milestone.
+Represents a source-link evidence record saved from the Fraud Monitor review queue.
 
 Fields:
 
@@ -224,7 +225,8 @@ Fields:
 
 ## Timeline Event
 
-Represents important case activity.
+Represents important Fraud Monitor activity: scan runs, review updates, evidence save/update,
+finding create/update, and export generation.
 
 Fields:
 
@@ -232,11 +234,13 @@ Fields:
 - case_id.
 - event_type.
 - title.
-- description.
-- object_type.
-- object_id.
-- occurred_at.
+- summary.
+- actor.
+- related_result_id.
+- related_evidence_link_id.
+- related_finding_id.
 - metadata_json.
+- created_at.
 
 ## Report Export
 

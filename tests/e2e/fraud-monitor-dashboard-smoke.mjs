@@ -177,6 +177,24 @@ async function main() {
     await expectVisible(page.getByText("2 vault artifact(s)"), "vault artifact badge");
     await expectVisible(page.getByText("Text snapshot"), "text snapshot artifact");
     await expectVisible(page.getByText("Source URL"), "source URL artifact");
+    await expectVisible(page.getByRole("heading", { name: "Findings workspace" }), "findings workspace");
+
+    await page.getByRole("textbox", { name: "Title" }).fill("Analyst-authored fixture finding");
+    await page.getByLabel("Summary").fill("Reviewed fixture evidence supports a cautious follow-up lead.");
+    await page.getByRole("combobox", { name: "Confidence", exact: true }).selectOption("medium");
+    await page.getByRole("combobox", { name: "Status", exact: true }).selectOption("active");
+    await page.getByLabel("Analyst notes").fill("No automated fraud verdict is asserted.");
+    await page.getByRole("checkbox", { name: "Public lending fraud reporting fixture", exact: true }).check();
+    await Promise.all([
+      page.waitForResponse(
+        (response) => response.url().includes("/api/backend/fraud-monitor/findings") && response.status() === 201,
+      ),
+      page.getByRole("button", { name: "Save finding" }).click(),
+    ]);
+    await expectVisible(page.getByText("Finding saved: Analyst-authored fixture finding"), "finding saved notice");
+    await expectVisible(page.getByText("Reviewed fixture evidence supports a cautious follow-up lead."), "saved finding summary");
+    await expectVisible(page.getByRole("heading", { name: "Timeline" }), "timeline section");
+    await expectVisible(page.getByText("Finding created"), "finding timeline event");
 
     await page.getByLabel("Search").fill("Agency");
     await Promise.all([

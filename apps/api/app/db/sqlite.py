@@ -233,6 +233,64 @@ def initialize_database() -> None:
                 provider TEXT NOT NULL,
                 PRIMARY KEY (job_id, news_run_id)
             );
+
+            CREATE TABLE IF NOT EXISTS findings (
+                id TEXT PRIMARY KEY,
+                case_id TEXT NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+                title TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                confidence TEXT NOT NULL CHECK (
+                    confidence IN ('high', 'medium', 'low', 'unknown')
+                ),
+                status TEXT NOT NULL CHECK (
+                    status IN ('draft', 'active', 'resolved', 'archived')
+                ),
+                analyst_notes TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_findings_case_id
+                ON findings(case_id);
+            CREATE INDEX IF NOT EXISTS idx_findings_updated_at
+                ON findings(updated_at);
+
+            CREATE TABLE IF NOT EXISTS finding_evidence_links (
+                finding_id TEXT NOT NULL REFERENCES findings(id) ON DELETE CASCADE,
+                evidence_link_id TEXT NOT NULL REFERENCES evidence_links(id) ON DELETE CASCADE,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (finding_id, evidence_link_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_finding_evidence_links_evidence_id
+                ON finding_evidence_links(evidence_link_id);
+
+            CREATE TABLE IF NOT EXISTS timeline_events (
+                id TEXT PRIMARY KEY,
+                case_id TEXT NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+                event_type TEXT NOT NULL CHECK (
+                    event_type IN (
+                        'scan_run',
+                        'review_update',
+                        'evidence_save',
+                        'evidence_update',
+                        'finding_create',
+                        'finding_update',
+                        'export_generation'
+                    )
+                ),
+                title TEXT NOT NULL,
+                summary TEXT NOT NULL DEFAULT '',
+                actor TEXT NOT NULL DEFAULT 'analyst',
+                related_result_id TEXT REFERENCES news_results(id) ON DELETE SET NULL,
+                related_evidence_link_id TEXT REFERENCES evidence_links(id) ON DELETE SET NULL,
+                related_finding_id TEXT REFERENCES findings(id) ON DELETE SET NULL,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_timeline_events_case_id_created_at
+                ON timeline_events(case_id, created_at);
             """
         )
         ensure_column(
@@ -302,6 +360,71 @@ def initialize_database() -> None:
             "INTEGER NOT NULL DEFAULT 0",
         )
         initialize_evidence_artifact_table(connection)
+        initialize_findings_and_timeline_tables(connection)
+
+
+def initialize_findings_and_timeline_tables(connection: sqlite3.Connection) -> None:
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS findings (
+            id TEXT PRIMARY KEY,
+            case_id TEXT NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+            title TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            confidence TEXT NOT NULL CHECK (
+                confidence IN ('high', 'medium', 'low', 'unknown')
+            ),
+            status TEXT NOT NULL CHECK (
+                status IN ('draft', 'active', 'resolved', 'archived')
+            ),
+            analyst_notes TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_findings_case_id
+            ON findings(case_id);
+        CREATE INDEX IF NOT EXISTS idx_findings_updated_at
+            ON findings(updated_at);
+
+        CREATE TABLE IF NOT EXISTS finding_evidence_links (
+            finding_id TEXT NOT NULL REFERENCES findings(id) ON DELETE CASCADE,
+            evidence_link_id TEXT NOT NULL REFERENCES evidence_links(id) ON DELETE CASCADE,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (finding_id, evidence_link_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_finding_evidence_links_evidence_id
+            ON finding_evidence_links(evidence_link_id);
+
+        CREATE TABLE IF NOT EXISTS timeline_events (
+            id TEXT PRIMARY KEY,
+            case_id TEXT NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+            event_type TEXT NOT NULL CHECK (
+                event_type IN (
+                    'scan_run',
+                    'review_update',
+                    'evidence_save',
+                    'evidence_update',
+                    'finding_create',
+                    'finding_update',
+                    'export_generation'
+                )
+            ),
+            title TEXT NOT NULL,
+            summary TEXT NOT NULL DEFAULT '',
+            actor TEXT NOT NULL DEFAULT 'analyst',
+            related_result_id TEXT REFERENCES news_results(id) ON DELETE SET NULL,
+            related_evidence_link_id TEXT REFERENCES evidence_links(id) ON DELETE SET NULL,
+            related_finding_id TEXT REFERENCES findings(id) ON DELETE SET NULL,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_timeline_events_case_id_created_at
+            ON timeline_events(case_id, created_at);
+        """
+    )
 
 
 def initialize_evidence_artifact_table(connection: sqlite3.Connection) -> None:

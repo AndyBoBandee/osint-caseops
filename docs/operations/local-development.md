@@ -164,6 +164,8 @@ Both formats include:
 - Generated timestamp, scope, passive methodology, provider configuration, and local-only metadata.
 - Reviewed fraud monitor results only; pending results remain in the dashboard queue but are not exported.
 - Evidence table rows with source URL, provider, review status, analyst note, retrieval timestamp, publication timestamp, and title.
+- Analyst-authored findings with confidence, status, notes, and linked evidence.
+- Timeline/provenance events for scans, review updates, evidence changes, finding changes, and export generation.
 - Trend groups with confidence-aware wording and analyst-review language.
 - Responsible-use limitations that warn against unsupported allegations and remind the user to redact before sharing.
 

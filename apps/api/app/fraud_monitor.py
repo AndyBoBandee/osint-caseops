@@ -10,9 +10,9 @@ from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import PlainTextResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
-from app.cases import connect
+from app.cases import connect, normalize_long_text, normalize_required_text
 from app.core.config import get_settings
 from app.news_monitoring import (
     EvidenceLinkCreate,
@@ -50,6 +50,17 @@ SearchMode = Literal["standard", "detailed"]
 ProviderStatus = Literal["ready", "missing_config", "unsupported", "timeout", "partial_success"]
 EvidenceFilter = Literal["all", "saved", "unsaved"]
 ValidationSeverity = Literal["error", "warning", "info"]
+FindingConfidence = Literal["high", "medium", "low", "unknown"]
+FindingStatus = Literal["draft", "active", "resolved", "archived"]
+TimelineEventType = Literal[
+    "scan_run",
+    "review_update",
+    "evidence_save",
+    "evidence_update",
+    "finding_create",
+    "finding_update",
+    "export_generation",
+]
 ResultSort = Literal[
     "retrieved_desc",
     "retrieved_asc",
@@ -186,6 +197,8 @@ class FraudMonitorDashboard(BaseModel):
     pending_results: int
     relevant_results: int
     not_relevant_results: int
+    findings: list["FindingRecord"]
+    timeline_events: list["TimelineEventRecord"]
 
 
 class FraudMonitorBulkReviewUpdate(BaseModel):
@@ -198,6 +211,105 @@ class FraudMonitorBulkReviewResult(BaseModel):
     results: list[NewsResultRecord]
 
 
+class LinkedEvidenceRecord(BaseModel):
+    id: str
+    source_url: str
+    publisher: str
+    title: str
+    analyst_note: str
+    review_status: ReviewStatus
+    available_artifact_count: int
+    created_at: str
+
+
+class FindingBase(BaseModel):
+    title: str = Field(min_length=1, max_length=240)
+    summary: str = Field(min_length=1, max_length=2000)
+    confidence: FindingConfidence = "unknown"
+    status: FindingStatus = "draft"
+    analyst_notes: str = Field(default="", max_length=4000)
+    evidence_link_ids: list[str] = Field(default_factory=list, max_length=20)
+
+    @field_validator("title", "summary")
+    @classmethod
+    def clean_required_text(cls, value: str) -> str:
+        return normalize_required_text(value)
+
+    @field_validator("analyst_notes")
+    @classmethod
+    def clean_analyst_notes(cls, value: str) -> str:
+        return normalize_long_text(value)
+
+    @field_validator("evidence_link_ids")
+    @classmethod
+    def clean_evidence_ids(cls, value: list[str]) -> list[str]:
+        cleaned: list[str] = []
+        seen: set[str] = set()
+        for evidence_id in value:
+            normalized = evidence_id.strip()
+            if normalized and normalized not in seen:
+                cleaned.append(normalized)
+                seen.add(normalized)
+        return cleaned
+
+
+class FindingCreate(FindingBase):
+    pass
+
+
+class FindingUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=240)
+    summary: str | None = Field(default=None, min_length=1, max_length=2000)
+    confidence: FindingConfidence | None = None
+    status: FindingStatus | None = None
+    analyst_notes: str | None = Field(default=None, max_length=4000)
+    evidence_link_ids: list[str] | None = Field(default=None, max_length=20)
+
+    @field_validator("title", "summary")
+    @classmethod
+    def clean_optional_required_text(cls, value: str | None) -> str | None:
+        return normalize_required_text(value) if value is not None else value
+
+    @field_validator("analyst_notes")
+    @classmethod
+    def clean_optional_notes(cls, value: str | None) -> str | None:
+        return normalize_long_text(value) if value is not None else value
+
+    @field_validator("evidence_link_ids")
+    @classmethod
+    def clean_optional_evidence_ids(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        return FindingBase.clean_evidence_ids(value)
+
+
+class FindingRecord(BaseModel):
+    id: str
+    case_id: str
+    title: str
+    summary: str
+    confidence: FindingConfidence
+    status: FindingStatus
+    analyst_notes: str
+    linked_evidence: list[LinkedEvidenceRecord]
+    created_at: str
+    updated_at: str
+
+
+class TimelineEventRecord(BaseModel):
+    id: str
+    case_id: str
+    event_type: TimelineEventType
+    title: str
+    summary: str
+    actor: str
+    related_result_id: str | None
+    related_evidence_link_id: str | None
+    related_finding_id: str | None
+    metadata: dict[str, Any]
+    created_at: str
+
+
 class FraudMonitorExportMetadata(BaseModel):
     generated_at: str
     scope: str
@@ -205,6 +317,8 @@ class FraudMonitorExportMetadata(BaseModel):
     provider_configuration: list[ProviderInfo]
     reviewed_result_count: int
     evidence_count: int
+    finding_count: int
+    timeline_event_count: int
     available_artifact_count: int
     local_only: bool
     responsible_use: str
@@ -230,6 +344,8 @@ class FraudMonitorExportBundle(BaseModel):
     trend_summary: TrendSummary
     evidence_table: list[FraudMonitorEvidenceTableRow]
     reviewed_results: list[NewsResultRecord]
+    findings: list[FindingRecord]
+    timeline_events: list[TimelineEventRecord]
     limitations: list[str]
 
 
@@ -725,6 +841,273 @@ def available_artifact_count(connection: sqlite3.Connection, case_id: str) -> in
     return int(row["count"] if row else 0)
 
 
+def row_to_timeline_event(row: sqlite3.Row) -> TimelineEventRecord:
+    metadata = json.loads(row["metadata_json"] or "{}")
+    if not isinstance(metadata, dict):
+        metadata = {}
+    return TimelineEventRecord(
+        id=row["id"],
+        case_id=row["case_id"],
+        event_type=row["event_type"],
+        title=row["title"],
+        summary=row["summary"],
+        actor=row["actor"],
+        related_result_id=row["related_result_id"],
+        related_evidence_link_id=row["related_evidence_link_id"],
+        related_finding_id=row["related_finding_id"],
+        metadata=metadata,
+        created_at=row["created_at"],
+    )
+
+
+def record_timeline_event(
+    connection: sqlite3.Connection,
+    *,
+    case_id: str,
+    event_type: TimelineEventType,
+    title: str,
+    summary: str = "",
+    related_result_id: str | None = None,
+    related_evidence_link_id: str | None = None,
+    related_finding_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> str:
+    event_id = str(uuid4())
+    created_at = utc_now()
+    connection.execute(
+        """
+        INSERT INTO timeline_events (
+            id,
+            case_id,
+            event_type,
+            title,
+            summary,
+            actor,
+            related_result_id,
+            related_evidence_link_id,
+            related_finding_id,
+            metadata_json,
+            created_at
+        )
+        VALUES (?, ?, ?, ?, ?, 'analyst', ?, ?, ?, ?, ?)
+        """,
+        (
+            event_id,
+            case_id,
+            event_type,
+            title,
+            summary,
+            related_result_id,
+            related_evidence_link_id,
+            related_finding_id,
+            json.dumps(metadata or {}, sort_keys=True),
+            created_at,
+        ),
+    )
+    return event_id
+
+
+def list_timeline_events(
+    connection: sqlite3.Connection,
+    case_id: str,
+    limit: int = 25,
+) -> list[TimelineEventRecord]:
+    rows = connection.execute(
+        """
+        SELECT *
+        FROM timeline_events
+        WHERE case_id = ?
+        ORDER BY created_at DESC
+        LIMIT ?
+        """,
+        (case_id, limit),
+    ).fetchall()
+    return [row_to_timeline_event(row) for row in rows]
+
+
+def evidence_summary_rows(
+    connection: sqlite3.Connection,
+    evidence_link_ids: list[str],
+) -> dict[str, LinkedEvidenceRecord]:
+    if not evidence_link_ids:
+        return {}
+    placeholders = ", ".join("?" for _ in evidence_link_ids)
+    rows = connection.execute(
+        f"""
+        SELECT evidence_links.*,
+            news_results.review_status,
+            COUNT(evidence_artifacts.id) AS available_artifact_count
+        FROM evidence_links
+        JOIN news_results ON news_results.id = evidence_links.news_result_id
+        LEFT JOIN evidence_artifacts
+            ON evidence_artifacts.evidence_link_id = evidence_links.id
+            AND evidence_artifacts.availability = 'available'
+        WHERE evidence_links.id IN ({placeholders})
+        GROUP BY evidence_links.id
+        """,
+        tuple(evidence_link_ids),
+    ).fetchall()
+    return {
+        row["id"]: LinkedEvidenceRecord(
+            id=row["id"],
+            source_url=row["source_url"],
+            publisher=row["publisher"],
+            title=row["title"] or row["source_url"],
+            analyst_note=row["analyst_note"],
+            review_status=row["review_status"],
+            available_artifact_count=int(row["available_artifact_count"] or 0),
+            created_at=row["created_at"],
+        )
+        for row in rows
+    }
+
+
+def row_to_finding(
+    row: sqlite3.Row,
+    linked_evidence: list[LinkedEvidenceRecord],
+) -> FindingRecord:
+    return FindingRecord(
+        id=row["id"],
+        case_id=row["case_id"],
+        title=row["title"],
+        summary=row["summary"],
+        confidence=row["confidence"],
+        status=row["status"],
+        analyst_notes=row["analyst_notes"],
+        linked_evidence=linked_evidence,
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+def list_findings(connection: sqlite3.Connection, case_id: str) -> list[FindingRecord]:
+    rows = connection.execute(
+        """
+        SELECT *
+        FROM findings
+        WHERE case_id = ?
+        ORDER BY updated_at DESC, created_at DESC
+        """,
+        (case_id,),
+    ).fetchall()
+    finding_ids = [row["id"] for row in rows]
+    linked_by_finding: dict[str, list[str]] = {finding_id: [] for finding_id in finding_ids}
+    if finding_ids:
+        placeholders = ", ".join("?" for _ in finding_ids)
+        link_rows = connection.execute(
+            f"""
+            SELECT finding_id, evidence_link_id
+            FROM finding_evidence_links
+            WHERE finding_id IN ({placeholders})
+            ORDER BY created_at ASC
+            """,
+            tuple(finding_ids),
+        ).fetchall()
+        for link_row in link_rows:
+            linked_by_finding.setdefault(link_row["finding_id"], []).append(link_row["evidence_link_id"])
+
+    all_evidence_ids = [
+        evidence_id
+        for evidence_ids in linked_by_finding.values()
+        for evidence_id in evidence_ids
+    ]
+    evidence_by_id = evidence_summary_rows(connection, all_evidence_ids)
+    return [
+        row_to_finding(
+            row,
+            [
+                evidence_by_id[evidence_id]
+                for evidence_id in linked_by_finding[row["id"]]
+                if evidence_id in evidence_by_id
+            ],
+        )
+        for row in rows
+    ]
+
+
+def get_finding_or_404(
+    connection: sqlite3.Connection,
+    finding_id: str,
+    case_id: str,
+) -> sqlite3.Row:
+    row = connection.execute(
+        "SELECT * FROM findings WHERE id = ? AND case_id = ?",
+        (finding_id, case_id),
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Finding not found.")
+    return row
+
+
+def get_finding_record_or_404(
+    connection: sqlite3.Connection,
+    finding_id: str,
+    case_id: str,
+) -> FindingRecord:
+    row = get_finding_or_404(connection, finding_id, case_id)
+    link_rows = connection.execute(
+        """
+        SELECT evidence_link_id
+        FROM finding_evidence_links
+        WHERE finding_id = ?
+        ORDER BY created_at ASC
+        """,
+        (finding_id,),
+    ).fetchall()
+    evidence_ids = [link_row["evidence_link_id"] for link_row in link_rows]
+    evidence_by_id = evidence_summary_rows(connection, evidence_ids)
+    return row_to_finding(
+        row,
+        [
+            evidence_by_id[evidence_id]
+            for evidence_id in evidence_ids
+            if evidence_id in evidence_by_id
+        ],
+    )
+
+
+def validate_evidence_links(
+    connection: sqlite3.Connection,
+    case_id: str,
+    evidence_link_ids: list[str],
+) -> None:
+    if not evidence_link_ids:
+        return
+    placeholders = ", ".join("?" for _ in evidence_link_ids)
+    rows = connection.execute(
+        f"""
+        SELECT id
+        FROM evidence_links
+        WHERE case_id = ? AND id IN ({placeholders})
+        """,
+        tuple([case_id, *evidence_link_ids]),
+    ).fetchall()
+    existing_ids = {row["id"] for row in rows}
+    if existing_ids != set(evidence_link_ids):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="One or more evidence links were not found.",
+        )
+
+
+def replace_finding_evidence_links(
+    connection: sqlite3.Connection,
+    *,
+    finding_id: str,
+    evidence_link_ids: list[str],
+    created_at: str,
+) -> None:
+    connection.execute("DELETE FROM finding_evidence_links WHERE finding_id = ?", (finding_id,))
+    for evidence_link_id in evidence_link_ids:
+        connection.execute(
+            """
+            INSERT INTO finding_evidence_links (finding_id, evidence_link_id, created_at)
+            VALUES (?, ?, ?)
+            """,
+            (finding_id, evidence_link_id, created_at),
+        )
+
+
 def latest_error(connection: sqlite3.Connection) -> tuple[str, str]:
     row = connection.execute(
         """
@@ -962,6 +1345,21 @@ def run_fraud_monitor_job_locked(
                 completed_at,
             ),
         )
+        record_timeline_event(
+            connection,
+            case_id=case_id,
+            event_type="scan_run",
+            title=f"{trigger_type.title()} fraud scan completed",
+            summary=f"{result_count} result(s) stored with {status} status.",
+            metadata={
+                "job_id": job_id,
+                "trigger_type": trigger_type,
+                "status": status,
+                "provider_count": len(providers),
+                "result_count": result_count,
+                "providers": providers,
+            },
+        )
         connection.execute("UPDATE cases SET updated_at = ? WHERE id = ?", (completed_at, case_id))
         row = connection.execute("SELECT * FROM fraud_monitor_jobs WHERE id = ?", (job_id,)).fetchone()
 
@@ -1011,6 +1409,8 @@ def build_dashboard(
         )
         counts = result_counts(connection, case_id)
         evidence_total = evidence_count(connection, case_id)
+        findings = list_findings(connection, case_id)
+        timeline_events = list_timeline_events(connection, case_id)
         last_error_message, last_error_at = latest_error(connection)
         providers = [
             provider_info(provider, connection, case_id, settings["next_run_at"])
@@ -1045,6 +1445,8 @@ def build_dashboard(
         pending_results=counts["pending"],
         relevant_results=counts["relevant"],
         not_relevant_results=counts["not_relevant"],
+        findings=findings,
+        timeline_events=timeline_events,
     )
 
 
@@ -1110,6 +1512,20 @@ def build_export_bundle() -> FraudMonitorExportBundle:
         ]
         evidence_total = evidence_count(connection, case_id)
         artifact_total = available_artifact_count(connection, case_id)
+        findings = list_findings(connection, case_id)
+        record_timeline_event(
+            connection,
+            case_id=case_id,
+            event_type="export_generation",
+            title="Fraud Monitor export generated",
+            summary="Local export bundle prepared with reviewed evidence, findings, and timeline context.",
+            metadata={
+                "reviewed_result_count": len(reviewed_results),
+                "evidence_count": evidence_total,
+                "finding_count": len(findings),
+            },
+        )
+        timeline_events = list_timeline_events(connection, case_id, limit=100)
 
     trend_summary = get_news_trends(case_id)
     return FraudMonitorExportBundle(
@@ -1123,6 +1539,8 @@ def build_export_bundle() -> FraudMonitorExportBundle:
             provider_configuration=providers,
             reviewed_result_count=len(reviewed_results),
             evidence_count=evidence_total,
+            finding_count=len(findings),
+            timeline_event_count=len(timeline_events),
             available_artifact_count=artifact_total,
             local_only=True,
             responsible_use=(
@@ -1133,6 +1551,8 @@ def build_export_bundle() -> FraudMonitorExportBundle:
         trend_summary=trend_summary,
         evidence_table=evidence_rows,
         reviewed_results=reviewed_results,
+        findings=findings,
+        timeline_events=timeline_events,
         limitations=export_limitations(),
     )
 
@@ -1161,6 +1581,8 @@ def export_bundle_to_markdown(bundle: FraudMonitorExportBundle) -> str:
         f"- Methodology: {bundle.metadata.methodology}",
         f"- Reviewed results: {bundle.metadata.reviewed_result_count}",
         f"- Evidence links: {bundle.metadata.evidence_count}",
+        f"- Findings: {bundle.metadata.finding_count}",
+        f"- Timeline events: {bundle.metadata.timeline_event_count}",
         f"- Available vault artifacts: {bundle.metadata.available_artifact_count}",
         f"- Local only: {'yes' if bundle.metadata.local_only else 'no'}",
         f"- Responsible use: {bundle.metadata.responsible_use}",
@@ -1240,6 +1662,44 @@ def export_bundle_to_markdown(bundle: FraudMonitorExportBundle) -> str:
     else:
         lines.append("No reviewed fraud monitor results are available yet.")
 
+    lines.extend(["", "## Analyst Findings", ""])
+    if bundle.findings:
+        for finding in bundle.findings:
+            evidence_titles = ", ".join(evidence.title for evidence in finding.linked_evidence) or "No linked evidence"
+            lines.extend(
+                [
+                    f"### {finding.title}",
+                    "",
+                    f"- Confidence: {finding.confidence}",
+                    f"- Status: {finding.status}",
+                    f"- Summary: {finding.summary}",
+                    f"- Linked evidence: {evidence_titles}",
+                ]
+            )
+            if finding.analyst_notes:
+                lines.append(f"- Analyst notes: {finding.analyst_notes}")
+            lines.append("")
+    else:
+        lines.append("No analyst-authored findings are available yet.")
+
+    lines.extend(["", "## Timeline", ""])
+    if bundle.timeline_events:
+        lines.extend(
+            markdown_table(
+                ["Time", "Event", "Summary"],
+                [
+                    [
+                        event.created_at,
+                        event.title,
+                        event.summary,
+                    ]
+                    for event in bundle.timeline_events
+                ],
+            )
+        )
+    else:
+        lines.append("No timeline events are available yet.")
+
     lines.extend(["", "## Limitations", ""])
     lines.extend(f"- {limitation}" for limitation in bundle.limitations)
     lines.append("")
@@ -1279,6 +1739,135 @@ def export_markdown_report() -> PlainTextResponse:
         media_type="text/markdown; charset=utf-8",
         headers={"Content-Disposition": 'attachment; filename="fraud-monitor-export.md"'},
     )
+
+
+@router.get("/findings", response_model=list[FindingRecord])
+def get_findings() -> list[FindingRecord]:
+    with connect() as connection:
+        settings = ensure_monitor_settings(connection)
+        return list_findings(connection, settings["case_id"])
+
+
+@router.post("/findings", response_model=FindingRecord, status_code=status.HTTP_201_CREATED)
+def create_finding(payload: FindingCreate) -> FindingRecord:
+    with connect() as connection:
+        settings = ensure_monitor_settings(connection)
+        case_id = settings["case_id"]
+        validate_evidence_links(connection, case_id, payload.evidence_link_ids)
+        finding_id = str(uuid4())
+        now = utc_now()
+        connection.execute(
+            """
+            INSERT INTO findings (
+                id,
+                case_id,
+                title,
+                summary,
+                confidence,
+                status,
+                analyst_notes,
+                created_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                finding_id,
+                case_id,
+                payload.title,
+                payload.summary,
+                payload.confidence,
+                payload.status,
+                payload.analyst_notes,
+                now,
+                now,
+            ),
+        )
+        replace_finding_evidence_links(
+            connection,
+            finding_id=finding_id,
+            evidence_link_ids=payload.evidence_link_ids,
+            created_at=now,
+        )
+        record_timeline_event(
+            connection,
+            case_id=case_id,
+            event_type="finding_create",
+            title="Finding created",
+            summary=f"Analyst-authored finding: {payload.title}",
+            related_finding_id=finding_id,
+            metadata={
+                "confidence": payload.confidence,
+                "status": payload.status,
+                "linked_evidence_count": len(payload.evidence_link_ids),
+            },
+        )
+        connection.execute("UPDATE cases SET updated_at = ? WHERE id = ?", (now, case_id))
+        return get_finding_record_or_404(connection, finding_id, case_id)
+
+
+@router.patch("/findings/{finding_id}", response_model=FindingRecord)
+def update_finding(finding_id: str, payload: FindingUpdate) -> FindingRecord:
+    with connect() as connection:
+        settings = ensure_monitor_settings(connection)
+        case_id = settings["case_id"]
+        existing = get_finding_or_404(connection, finding_id, case_id)
+        if payload.evidence_link_ids is not None:
+            validate_evidence_links(connection, case_id, payload.evidence_link_ids)
+        title = payload.title if payload.title is not None else existing["title"]
+        summary = payload.summary if payload.summary is not None else existing["summary"]
+        confidence = payload.confidence if payload.confidence is not None else existing["confidence"]
+        finding_status = payload.status if payload.status is not None else existing["status"]
+        analyst_notes = (
+            payload.analyst_notes
+            if payload.analyst_notes is not None
+            else existing["analyst_notes"]
+        )
+        now = utc_now()
+        connection.execute(
+            """
+            UPDATE findings
+            SET title = ?,
+                summary = ?,
+                confidence = ?,
+                status = ?,
+                analyst_notes = ?,
+                updated_at = ?
+            WHERE id = ? AND case_id = ?
+            """,
+            (
+                title,
+                summary,
+                confidence,
+                finding_status,
+                analyst_notes,
+                now,
+                finding_id,
+                case_id,
+            ),
+        )
+        if payload.evidence_link_ids is not None:
+            replace_finding_evidence_links(
+                connection,
+                finding_id=finding_id,
+                evidence_link_ids=payload.evidence_link_ids,
+                created_at=now,
+            )
+        record_timeline_event(
+            connection,
+            case_id=case_id,
+            event_type="finding_update",
+            title="Finding updated",
+            summary=f"Analyst-updated finding: {title}",
+            related_finding_id=finding_id,
+            metadata={
+                "confidence": confidence,
+                "status": finding_status,
+                "linked_evidence_count": len(payload.evidence_link_ids or []),
+            },
+        )
+        connection.execute("UPDATE cases SET updated_at = ? WHERE id = ?", (now, case_id))
+        return get_finding_record_or_404(connection, finding_id, case_id)
 
 
 @router.get("/configuration/validation", response_model=FraudMonitorConfigurationValidation)
@@ -1330,7 +1919,19 @@ def update_result(result_id: str, payload: NewsResultUpdate) -> dict[str, Any]:
         settings = ensure_monitor_settings(connection)
         if result["case_id"] != settings["case_id"]:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Result not found.")
-    return update_news_result(result_id, payload)
+    updated = update_news_result(result_id, payload)
+    with connect() as connection:
+        settings = ensure_monitor_settings(connection)
+        record_timeline_event(
+            connection,
+            case_id=settings["case_id"],
+            event_type="review_update",
+            title="Review status updated",
+            summary=f"Result marked {payload.review_status.replace('_', ' ')}.",
+            related_result_id=result_id,
+            metadata={"review_status": payload.review_status},
+        )
+    return updated
 
 
 @router.patch("/review-batches", response_model=FraudMonitorBulkReviewResult)
@@ -1362,6 +1963,17 @@ def bulk_update_results(payload: FraudMonitorBulkReviewUpdate) -> FraudMonitorBu
             tuple([payload.review_status, case_id, *result_ids]),
         )
         connection.execute("UPDATE cases SET updated_at = ? WHERE id = ?", (now, case_id))
+        record_timeline_event(
+            connection,
+            case_id=case_id,
+            event_type="review_update",
+            title="Bulk review status updated",
+            summary=f"{len(existing_ids)} result(s) marked {payload.review_status.replace('_', ' ')}.",
+            metadata={
+                "review_status": payload.review_status,
+                "result_count": len(existing_ids),
+            },
+        )
         rows = connection.execute(
             f"""
             SELECT news_results.*,
@@ -1393,7 +2005,20 @@ def save_result_evidence(result_id: str, payload: EvidenceLinkCreate) -> dict[st
         settings = ensure_monitor_settings(connection)
         if result["case_id"] != settings["case_id"]:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Result not found.")
-    return save_news_result_as_evidence(result_id, payload)
+    evidence = save_news_result_as_evidence(result_id, payload)
+    with connect() as connection:
+        settings = ensure_monitor_settings(connection)
+        record_timeline_event(
+            connection,
+            case_id=settings["case_id"],
+            event_type="evidence_save",
+            title="Evidence link saved",
+            summary=evidence["title"] or evidence["source_url"],
+            related_result_id=result_id,
+            related_evidence_link_id=evidence["id"],
+            metadata={"source_url": evidence["source_url"]},
+        )
+    return evidence
 
 
 @router.patch("/evidence-links/{evidence_link_id}", response_model=EvidenceLinkRecord)
@@ -1406,7 +2031,20 @@ def update_result_evidence_note(
         settings = ensure_monitor_settings(connection)
         if evidence_link["case_id"] != settings["case_id"]:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evidence link not found.")
-    return update_evidence_link(evidence_link_id, payload)
+    updated = update_evidence_link(evidence_link_id, payload)
+    with connect() as connection:
+        settings = ensure_monitor_settings(connection)
+        record_timeline_event(
+            connection,
+            case_id=settings["case_id"],
+            event_type="evidence_update",
+            title="Evidence note updated",
+            summary=updated["title"] or updated["source_url"],
+            related_result_id=updated["news_result_id"],
+            related_evidence_link_id=evidence_link_id,
+            metadata={"source_url": updated["source_url"]},
+        )
+    return updated
 
 
 def run_due_fraud_monitor_jobs() -> None:

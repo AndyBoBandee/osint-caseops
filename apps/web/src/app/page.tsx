@@ -70,6 +70,8 @@ const emptyDashboard: FraudMonitorDashboardData = {
   pending_results: 0,
   relevant_results: 0,
   not_relevant_results: 0,
+  findings: [],
+  timeline_events: [],
 };
 
 async function getApiJson<T>(path: string, fallback: T): Promise<T> {

@@ -2,6 +2,16 @@ export type ProviderStatus = "ready" | "missing_config" | "unsupported" | "timeo
 export type ValidationSeverity = "error" | "warning" | "info";
 export type NewsReviewStatus = "pending" | "relevant" | "not_relevant";
 export type NewsRunStatus = "success" | "partial" | "failed";
+export type FindingConfidence = "high" | "medium" | "low" | "unknown";
+export type FindingStatus = "draft" | "active" | "resolved" | "archived";
+export type TimelineEventType =
+  | "scan_run"
+  | "review_update"
+  | "evidence_save"
+  | "evidence_update"
+  | "finding_create"
+  | "finding_update"
+  | "export_generation";
 export type TrendGroupType = "keyword" | "classification" | "source" | "time_window" | "theme";
 export type EvidenceFilter = "all" | "saved" | "unsaved";
 export type EvidenceArtifactType = "source_url" | "html_snapshot" | "text_snapshot" | "screenshot";
@@ -136,6 +146,44 @@ export type EvidenceArtifactRecord = {
   created_at: string;
 };
 
+export type LinkedEvidenceRecord = {
+  id: string;
+  source_url: string;
+  publisher: string;
+  title: string;
+  analyst_note: string;
+  review_status: NewsReviewStatus;
+  available_artifact_count: number;
+  created_at: string;
+};
+
+export type FindingRecord = {
+  id: string;
+  case_id: string;
+  title: string;
+  summary: string;
+  confidence: FindingConfidence;
+  status: FindingStatus;
+  analyst_notes: string;
+  linked_evidence: LinkedEvidenceRecord[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type TimelineEventRecord = {
+  id: string;
+  case_id: string;
+  event_type: TimelineEventType;
+  title: string;
+  summary: string;
+  actor: string;
+  related_result_id: string | null;
+  related_evidence_link_id: string | null;
+  related_finding_id: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+};
+
 export type FraudMonitorResultPage = {
   total_matching: number;
   limit: number;
@@ -183,4 +231,6 @@ export type FraudMonitorDashboardData = {
   pending_results: number;
   relevant_results: number;
   not_relevant_results: number;
+  findings: FindingRecord[];
+  timeline_events: TimelineEventRecord[];
 };

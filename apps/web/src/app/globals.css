@@ -115,7 +115,7 @@
 
 .fm-stat-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: var(--space-4);
 }
 
@@ -137,7 +137,21 @@
 }
 
 .fm-result-list,
+.fm-finding-list,
 .fm-job-list {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.fm-finding-layout {
+  display: grid;
+  grid-template-columns: minmax(18rem, 0.9fr) minmax(22rem, 1.1fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.fm-finding-form,
+.fm-finding {
   display: grid;
   gap: var(--space-3);
 }
@@ -606,6 +620,7 @@
 
   .fm-stat-grid,
   .fm-control-grid,
+  .fm-finding-layout,
   .fm-filter-row,
   .fm-bulk-row,
   .fm-source-row,

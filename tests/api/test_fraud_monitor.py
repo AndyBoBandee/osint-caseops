@@ -813,6 +813,100 @@ def test_exports_include_reviewed_results_metadata_trends_and_escaped_markdown(
     assert "Public results are leads for analyst review" in markdown_response.text
 
 
+def test_findings_timeline_and_exports_preserve_analyst_authored_context(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    def fake_search(keyword: str, provider: str) -> list[ProviderResult]:
+        return [
+            ProviderResult(
+                keyword=keyword,
+                source_url="https://gdelt.example/reviewed-fraud-source",
+                publisher="Public Review Desk",
+                title="Reviewed fraud reporting source",
+                snippet="Public reporting describes facts requiring analyst review.",
+                published_at="2026-05-30T12:00:00Z",
+                retrieved_at="2026-05-30T12:05:00Z",
+            )
+        ]
+
+    monkeypatch.setattr(fraud_monitor, "search_public_news_with_provider", fake_search)
+
+    with make_client(tmp_path, monkeypatch, providers="gdelt") as client:
+        run_response = client.post("/fraud-monitor/jobs")
+        result_id = client.get("/fraud-monitor/dashboard").json()["results"][0]["id"]
+        review_response = client.patch(
+            f"/fraud-monitor/results/{result_id}",
+            json={"review_status": "relevant"},
+        )
+        evidence_response = client.post(
+            f"/fraud-monitor/results/{result_id}/evidence-links",
+            json={"analyst_note": "Source supports a cautious analyst note."},
+        )
+        evidence_id = evidence_response.json()["id"]
+
+        finding_response = client.post(
+            "/fraud-monitor/findings",
+            json={
+                "title": "Analyst-authored pattern note",
+                "summary": "Based on reviewed public reporting, this is a lead for follow-up.",
+                "confidence": "medium",
+                "status": "active",
+                "analyst_notes": "No automated fraud verdict is asserted.",
+                "evidence_link_ids": [evidence_id],
+            },
+        )
+        finding_id = finding_response.json()["id"]
+        update_response = client.patch(
+            f"/fraud-monitor/findings/{finding_id}",
+            json={
+                "confidence": "low",
+                "analyst_notes": "Confidence reduced pending another public source.",
+                "evidence_link_ids": [evidence_id],
+            },
+        )
+        dashboard = client.get("/fraud-monitor/dashboard").json()
+        export_response = client.get("/fraud-monitor/exports/json")
+        markdown_response = client.get("/fraud-monitor/exports/markdown")
+
+    assert run_response.status_code == 200
+    assert review_response.status_code == 200
+    assert evidence_response.status_code == 201
+    assert finding_response.status_code == 201
+    finding = finding_response.json()
+    assert finding["title"] == "Analyst-authored pattern note"
+    assert finding["summary"] == "Based on reviewed public reporting, this is a lead for follow-up."
+    assert finding["confidence"] == "medium"
+    assert finding["status"] == "active"
+    assert finding["linked_evidence"][0]["id"] == evidence_id
+    assert update_response.status_code == 200
+    assert update_response.json()["confidence"] == "low"
+
+    timeline_types = {event["event_type"] for event in dashboard["timeline_events"]}
+    assert {
+        "scan_run",
+        "review_update",
+        "evidence_save",
+        "finding_create",
+        "finding_update",
+    }.issubset(timeline_types)
+    assert dashboard["findings"][0]["analyst_notes"] == "Confidence reduced pending another public source."
+
+    bundle = export_response.json()
+    assert bundle["metadata"]["finding_count"] == 1
+    assert bundle["metadata"]["timeline_event_count"] >= 6
+    assert bundle["findings"][0]["title"] == "Analyst-authored pattern note"
+    assert bundle["findings"][0]["linked_evidence"][0]["source_url"] == "https://gdelt.example/reviewed-fraud-source"
+    assert any(event["event_type"] == "export_generation" for event in bundle["timeline_events"])
+    assert "No automated fraud verdict is asserted" not in bundle["metadata"]["responsible_use"]
+    assert "automated fraud conclusions" in bundle["limitations"][0]
+
+    assert markdown_response.status_code == 200
+    assert "## Analyst Findings" in markdown_response.text
+    assert "Analyst-authored pattern note" in markdown_response.text
+    assert "## Timeline" in markdown_response.text
+
+
 def test_review_operations_search_pagination_bulk_notes_and_duplicates(
     tmp_path: Path,
     monkeypatch,
