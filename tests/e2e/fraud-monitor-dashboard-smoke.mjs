@@ -147,6 +147,17 @@ async function main() {
     await expectVisible(page.getByRole("button", { name: "Run now" }), "run button");
     await expectVisible(page.getByRole("button", { name: "Export Markdown" }), "Markdown export button");
     await expectVisible(page.getByRole("button", { name: "Export JSON" }), "JSON export button");
+    await expectVisible(page.getByRole("heading", { name: "Operations control plane" }), "operations panel");
+    await expectVisible(page.getByText("Local only"), "local-only operations badge");
+
+    await Promise.all([
+      page.waitForResponse(
+        (response) => response.url().includes("/api/backend/fraud-monitor/operations/backups") && response.status() === 201,
+      ),
+      page.getByRole("button", { name: "Create local backup" }).click(),
+    ]);
+    await expectVisible(page.getByText("Local backup created:"), "backup created notice");
+    await expectVisible(page.getByText("reviewed export bundle"), "backup inclusion summary");
 
     await Promise.all([
       page.waitForResponse(

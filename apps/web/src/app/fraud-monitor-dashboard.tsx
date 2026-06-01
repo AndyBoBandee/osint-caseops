@@ -12,6 +12,8 @@ import {
   FraudMonitorJob,
   NewsResultRecord,
   NewsReviewStatus,
+  OperationsBackupArtifact,
+  OperationsRetentionCandidate,
   ProviderInfo,
   ResultSort,
   TrendGroup,
@@ -39,7 +41,7 @@ type ResultQuery = {
 };
 
 function statusClass(status: string) {
-  if (status === "success" || status === "ready" || status === "relevant" || status === "active") {
+  if (status === "success" || status === "ready" || status === "relevant" || status === "active" || status === "ok") {
     return "oc-badge oc-badge-success";
   }
   if (
@@ -47,11 +49,13 @@ function statusClass(status: string) {
     status === "missing_config" ||
     status === "partial_success" ||
     status === "pending" ||
-    status === "draft"
+    status === "draft" ||
+    status === "warning" ||
+    status === "idle"
   ) {
     return "oc-badge oc-badge-medium";
   }
-  if (status === "not_relevant" || status === "resolved" || status === "archived") {
+  if (status === "not_relevant" || status === "resolved" || status === "archived" || status === "disabled") {
     return "oc-badge oc-badge-muted";
   }
   return "oc-badge oc-badge-danger";
@@ -145,6 +149,16 @@ function artifactLabel(type: string) {
   return type.replaceAll("_", " ");
 }
 
+function formatBytes(value: number) {
+  if (value < 1024) {
+    return `${value} B`;
+  }
+  if (value < 1024 * 1024) {
+    return `${(value / 1024).toFixed(1)} KB`;
+  }
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function makeInitialQuery(dashboard: FraudMonitorDashboardData): ResultQuery {
   return {
     search: dashboard.result_page.search,
@@ -187,6 +201,8 @@ export function FraudMonitorDashboard({
   const [isRunningDetailed, setIsRunningDetailed] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSavingSchedule, setIsSavingSchedule] = useState(false);
+  const [isCreatingBackup, setIsCreatingBackup] = useState(false);
+  const [isCleaningUp, setIsCleaningUp] = useState(false);
   const [exportingFormat, setExportingFormat] = useState<"markdown" | "json" | null>(null);
   const [apiOnline, setApiOnline] = useState(initialApiOnline);
   const [reviewFilter, setReviewFilter] = useState<ReviewFilter>(initialDashboard.result_page.review_filter);
@@ -207,6 +223,7 @@ export function FraudMonitorDashboard({
     evidence_link_ids: [] as string[],
   });
   const [selectedResultIds, setSelectedResultIds] = useState<string[]>([]);
+  const [selectedCleanupIds, setSelectedCleanupIds] = useState<string[]>([]);
   const [bulkReviewStatus, setBulkReviewStatus] = useState<NewsReviewStatus>("relevant");
   const [intervalDraft, setIntervalDraft] = useState(
     String(initialDashboard.schedule.interval_minutes),
@@ -236,6 +253,7 @@ export function FraudMonitorDashboard({
     (result) => result.saved_as_evidence && result.evidence_link_id,
   );
   const showDetailedProvider = !dashboard.providers.some((provider) => provider.name === dashboard.detailed_provider.name);
+  const latestBackup = dashboard.operations.backups[0];
   const runDisabled =
     isRunning ||
     isRunningDetailed ||
@@ -260,6 +278,9 @@ export function FraudMonitorDashboard({
     setResultLimit(syncedQuery.limit);
     setIntervalDraft(String(nextDashboard.schedule.interval_minutes));
     setSelectedResultIds((current) => current.filter((id) => nextDashboard.results.some((result) => result.id === id)));
+    setSelectedCleanupIds((current) =>
+      current.filter((id) => nextDashboard.operations.retention_candidates.some((candidate) => candidate.id === id)),
+    );
     setApiOnline(true);
     setError("");
   }
@@ -342,6 +363,82 @@ export function FraudMonitorDashboard({
       setError(getRequestError(caught, "Could not download export."));
     } finally {
       setExportingFormat(null);
+    }
+  }
+
+  async function createBackup() {
+    setIsCreatingBackup(true);
+    setNotice("");
+    setError("");
+    try {
+      const backup = await apiRequest<OperationsBackupArtifact>("/fraud-monitor/operations/backups", {
+        method: "POST",
+        body: JSON.stringify({ note: "Created from the dashboard operations panel." }),
+      });
+      await refreshDashboard();
+      setNotice(`Local backup created: ${backup.filename}`);
+    } catch (caught) {
+      setError(getRequestError(caught, "Could not create local backup."));
+    } finally {
+      setIsCreatingBackup(false);
+    }
+  }
+
+  async function downloadBackup(backup: OperationsBackupArtifact) {
+    setNotice("");
+    setError("");
+    try {
+      const response = await fetch(`/api/backend${backup.download_url}`, {
+        cache: "no-store",
+      });
+      if (!response.ok) {
+        throw new Error(`${response.status} ${response.statusText}`);
+      }
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = backup.filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      setNotice("Local backup downloaded.");
+    } catch (caught) {
+      setError(getRequestError(caught, "Could not download local backup."));
+    }
+  }
+
+  function toggleCleanupCandidate(candidate: OperationsRetentionCandidate, checked: boolean) {
+    setSelectedCleanupIds((current) =>
+      checked
+        ? Array.from(new Set([...current, candidate.id]))
+        : current.filter((id) => id !== candidate.id),
+    );
+  }
+
+  async function cleanupSelectedCandidates() {
+    if (selectedCleanupIds.length === 0) {
+      return;
+    }
+    setIsCleaningUp(true);
+    setNotice("");
+    setError("");
+    try {
+      const result = await apiRequest<{ deleted_count: number; deleted_bytes: number }>(
+        "/fraud-monitor/operations/retention-candidates",
+        {
+          method: "DELETE",
+          body: JSON.stringify({ candidate_ids: selectedCleanupIds }),
+        },
+      );
+      await refreshDashboard();
+      setSelectedCleanupIds([]);
+      setNotice(`Cleaned up ${result.deleted_count} generated artifact(s), ${formatBytes(result.deleted_bytes)} freed.`);
+    } catch (caught) {
+      setError(getRequestError(caught, "Could not clean up selected artifacts."));
+    } finally {
+      setIsCleaningUp(false);
     }
   }
 
@@ -560,6 +657,9 @@ export function FraudMonitorDashboard({
           </a>
           <a className="oc-nav-link" href="#jobs">
             Jobs
+          </a>
+          <a className="oc-nav-link" href="#operations">
+            Operations
           </a>
         </nav>
         <div className={apiOnline ? "oc-badge oc-badge-success" : "oc-badge oc-badge-danger"}>
@@ -1198,6 +1298,111 @@ export function FraudMonitorDashboard({
                 {event.summary ? <p>{event.summary}</p> : null}
               </div>
             ))}
+          </div>
+        </section>
+
+        <section className="oc-card fm-panel" id="operations">
+          <div className="oc-card-header">
+            <div>
+              <h2 className="oc-card-title">Operations control plane</h2>
+              <p className="oc-card-description">Local health, backups, and review-before-cleanup maintenance.</p>
+            </div>
+            <span className={dashboard.operations.local_only ? "oc-badge oc-badge-success" : "oc-badge oc-badge-danger"}>
+              {dashboard.operations.local_only ? "Local only" : "Review config"}
+            </span>
+          </div>
+          <div className="fm-operations-grid">
+            <div className="oc-panel">
+              <div className="fm-result-header">
+                <h3>Local health</h3>
+                <span className={statusClass(dashboard.operations.database.status)}>
+                  DB {dashboard.operations.database.status}
+                </span>
+              </div>
+              <div className="oc-definition-list">
+                <Definition label="Data directory" value={dashboard.operations.data_directory.writable ? "Writable" : "Needs attention"} />
+                <Definition label="Data footprint" value={`${dashboard.operations.data_directory.file_count} file(s), ${formatBytes(dashboard.operations.data_directory.byte_size)}`} />
+                <Definition label="Database" value={formatBytes(dashboard.operations.database.byte_size)} />
+                <Definition label="Stored records" value={`${dashboard.operations.database.result_count} results, ${dashboard.operations.database.evidence_count} evidence`} />
+                <Definition label="Scheduler" value={`${dashboard.operations.scheduler.status}, ${dashboard.operations.scheduler.interval_minutes} min`} />
+              </div>
+              <div className="fm-artifact-list">
+                {dashboard.operations.warnings.map((warning) => (
+                  <div className="fm-artifact-row" key={warning.message}>
+                    <p>{warning.message}</p>
+                    <span className={issueClass(warning.severity)}>{warning.severity}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="oc-panel">
+              <div className="fm-result-header">
+                <h3>Backups</h3>
+                <span className="oc-badge oc-badge-info">{dashboard.operations.backups.length} artifact(s)</span>
+              </div>
+              <div className="oc-row-actions">
+                <button className="oc-btn oc-btn-primary" disabled={isCreatingBackup} onClick={() => void createBackup()} type="button">
+                  {isCreatingBackup ? "Creating" : "Create local backup"}
+                </button>
+                <button className="oc-btn" disabled={!latestBackup} onClick={() => latestBackup ? void downloadBackup(latestBackup) : undefined} type="button">
+                  Download latest
+                </button>
+              </div>
+              <div className="fm-artifact-list">
+                {dashboard.operations.backups.length === 0 ? (
+                  <p className="oc-empty-state">No generated operation backups yet.</p>
+                ) : null}
+                {dashboard.operations.backups.map((backup) => (
+                  <div className="fm-artifact-row" key={backup.filename}>
+                    <div>
+                      <strong>{backup.filename}</strong>
+                      <p>{formatBytes(backup.byte_size)} · {compactDate(backup.created_at)}</p>
+                      <p>{backup.includes.join(", ")}</p>
+                    </div>
+                    <button className="oc-btn oc-btn-sm" onClick={() => void downloadBackup(backup)} type="button">
+                      Download
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="oc-panel fm-retention-panel">
+            <div className="fm-result-header">
+              <div>
+                <h3>Retention review</h3>
+                <p className="oc-empty-state">Select generated artifacts to delete. Live case data and the database are not removed here.</p>
+              </div>
+              <button
+                className="oc-btn oc-btn-danger"
+                disabled={selectedCleanupIds.length === 0 || isCleaningUp}
+                onClick={() => void cleanupSelectedCandidates()}
+                type="button"
+              >
+                {isCleaningUp ? "Cleaning" : `Clean up ${selectedCleanupIds.length} selected`}
+              </button>
+            </div>
+            <div className="fm-artifact-list">
+              {dashboard.operations.retention_candidates.length === 0 ? (
+                <p className="oc-empty-state">No cleanup candidates are available.</p>
+              ) : null}
+              {dashboard.operations.retention_candidates.map((candidate) => (
+                <label className="fm-artifact-row fm-cleanup-row" key={candidate.id}>
+                  <input
+                    checked={selectedCleanupIds.includes(candidate.id)}
+                    onChange={(event) => toggleCleanupCandidate(candidate, event.target.checked)}
+                    type="checkbox"
+                  />
+                  <div>
+                    <strong>{candidate.filename}</strong>
+                    <p>{candidate.reason}</p>
+                    <p>{formatBytes(candidate.byte_size)} · {compactDate(candidate.created_at)}</p>
+                  </div>
+                </label>
+              ))}
+            </div>
           </div>
         </section>
 

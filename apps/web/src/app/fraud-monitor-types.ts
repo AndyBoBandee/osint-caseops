@@ -213,6 +213,71 @@ export type TrendSummary = {
   groups: TrendGroup[];
 };
 
+export type OperationsDataDirectoryHealth = {
+  status: "ok" | "warning" | "error";
+  path: string;
+  exists: boolean;
+  writable: boolean;
+  file_count: number;
+  byte_size: number;
+};
+
+export type OperationsDatabaseHealth = {
+  status: "ok" | "warning" | "error";
+  path: string;
+  exists: boolean;
+  byte_size: number;
+  case_count: number;
+  result_count: number;
+  evidence_count: number;
+  job_count: number;
+  checked_at: string;
+};
+
+export type OperationsSchedulerHealth = {
+  status: "idle" | "running" | "disabled";
+  enabled: boolean;
+  task_active: boolean;
+  job_running: boolean;
+  interval_minutes: number;
+  next_run_at: string;
+  last_completed_at: string;
+};
+
+export type OperationsWarning = {
+  severity: ValidationSeverity;
+  message: string;
+};
+
+export type OperationsBackupArtifact = {
+  filename: string;
+  path: string;
+  byte_size: number;
+  created_at: string;
+  includes: string[];
+  download_url: string;
+};
+
+export type OperationsRetentionCandidate = {
+  id: string;
+  filename: string;
+  path: string;
+  reason: string;
+  byte_size: number;
+  created_at: string;
+};
+
+export type OperationsStatus = {
+  generated_at: string;
+  local_only: boolean;
+  data_directory: OperationsDataDirectoryHealth;
+  database: OperationsDatabaseHealth;
+  scheduler: OperationsSchedulerHealth;
+  warnings: OperationsWarning[];
+  backups: OperationsBackupArtifact[];
+  retention_candidates: OperationsRetentionCandidate[];
+};
+
 export type FraudMonitorDashboardData = {
   keyword: string;
   case_id: string;
@@ -233,4 +298,5 @@ export type FraudMonitorDashboardData = {
   not_relevant_results: number;
   findings: FindingRecord[];
   timeline_events: TimelineEventRecord[];
+  operations: OperationsStatus;
 };

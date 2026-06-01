@@ -72,6 +72,41 @@ const emptyDashboard: FraudMonitorDashboardData = {
   not_relevant_results: 0,
   findings: [],
   timeline_events: [],
+  operations: {
+    generated_at: "",
+    local_only: true,
+    data_directory: {
+      status: "error",
+      path: "",
+      exists: false,
+      writable: false,
+      file_count: 0,
+      byte_size: 0,
+    },
+    database: {
+      status: "error",
+      path: "",
+      exists: false,
+      byte_size: 0,
+      case_count: 0,
+      result_count: 0,
+      evidence_count: 0,
+      job_count: 0,
+      checked_at: "",
+    },
+    scheduler: {
+      status: "disabled",
+      enabled: false,
+      task_active: false,
+      job_running: false,
+      interval_minutes: 60,
+      next_run_at: "",
+      last_completed_at: "",
+    },
+    warnings: [],
+    backups: [],
+    retention_candidates: [],
+  },
 };
 
 async function getApiJson<T>(path: string, fallback: T): Promise<T> {

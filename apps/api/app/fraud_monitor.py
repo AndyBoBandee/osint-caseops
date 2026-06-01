@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+import hashlib
 import json
+from pathlib import Path
 import sqlite3
 import threading
 from typing import Any, Literal
@@ -199,6 +201,7 @@ class FraudMonitorDashboard(BaseModel):
     not_relevant_results: int
     findings: list["FindingRecord"]
     timeline_events: list["TimelineEventRecord"]
+    operations: "OperationsStatus"
 
 
 class FraudMonitorBulkReviewUpdate(BaseModel):
@@ -347,6 +350,90 @@ class FraudMonitorExportBundle(BaseModel):
     findings: list[FindingRecord]
     timeline_events: list[TimelineEventRecord]
     limitations: list[str]
+
+
+class OperationsDataDirectoryHealth(BaseModel):
+    status: Literal["ok", "warning", "error"]
+    path: str
+    exists: bool
+    writable: bool
+    file_count: int
+    byte_size: int
+
+
+class OperationsDatabaseHealth(BaseModel):
+    status: Literal["ok", "warning", "error"]
+    path: str
+    exists: bool
+    byte_size: int
+    case_count: int
+    result_count: int
+    evidence_count: int
+    job_count: int
+    checked_at: str
+
+
+class OperationsSchedulerHealth(BaseModel):
+    status: Literal["idle", "running", "disabled"]
+    enabled: bool
+    task_active: bool
+    job_running: bool
+    interval_minutes: int
+    next_run_at: str
+    last_completed_at: str
+
+
+class OperationsWarning(BaseModel):
+    severity: ValidationSeverity
+    message: str
+
+
+class OperationsBackupArtifact(BaseModel):
+    filename: str
+    path: str
+    byte_size: int
+    created_at: str
+    includes: list[str]
+    download_url: str
+
+
+class OperationsRetentionCandidate(BaseModel):
+    id: str
+    filename: str
+    path: str
+    reason: str
+    byte_size: int
+    created_at: str
+
+
+class OperationsStatus(BaseModel):
+    generated_at: str
+    local_only: bool
+    data_directory: OperationsDataDirectoryHealth
+    database: OperationsDatabaseHealth
+    scheduler: OperationsSchedulerHealth
+    warnings: list[OperationsWarning]
+    backups: list[OperationsBackupArtifact]
+    retention_candidates: list[OperationsRetentionCandidate]
+
+
+class OperationsBackupCreate(BaseModel):
+    note: str = Field(default="", max_length=400)
+
+    @field_validator("note")
+    @classmethod
+    def clean_note(cls, value: str) -> str:
+        return normalize_long_text(value)
+
+
+class OperationsCleanupRequest(BaseModel):
+    candidate_ids: list[str] = Field(min_length=1, max_length=50)
+
+
+class OperationsCleanupResult(BaseModel):
+    deleted_count: int
+    deleted_bytes: int
+    remaining_candidates: list[OperationsRetentionCandidate]
 
 
 def configured_providers() -> list[str]:
@@ -839,6 +926,219 @@ def available_artifact_count(connection: sqlite3.Connection, case_id: str) -> in
         (case_id,),
     ).fetchone()
     return int(row["count"] if row else 0)
+
+
+def path_byte_size(path: Path) -> int:
+    if not path.exists():
+        return 0
+    if path.is_file():
+        return path.stat().st_size
+    total = 0
+    for child in path.rglob("*"):
+        if child.is_file():
+            total += child.stat().st_size
+    return total
+
+
+def path_file_count(path: Path) -> int:
+    if not path.exists():
+        return 0
+    if path.is_file():
+        return 1
+    return sum(1 for child in path.rglob("*") if child.is_file())
+
+
+def operation_exports_dir() -> Path:
+    exports_dir = get_settings().data_dir / "exports" / "operations"
+    exports_dir.mkdir(parents=True, exist_ok=True)
+    return exports_dir
+
+
+def backup_created_at(path: Path) -> str:
+    return datetime.fromtimestamp(path.stat().st_mtime, UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def list_operation_backups(limit: int = 5) -> list[OperationsBackupArtifact]:
+    exports_dir = operation_exports_dir()
+    backups = sorted(
+        exports_dir.glob("fraud-monitor-backup-*.json"),
+        key=lambda candidate: candidate.stat().st_mtime,
+        reverse=True,
+    )
+    artifacts: list[OperationsBackupArtifact] = []
+    for backup in backups[:limit]:
+        artifacts.append(
+            OperationsBackupArtifact(
+                filename=backup.name,
+                path=str(backup),
+                byte_size=backup.stat().st_size,
+                created_at=backup_created_at(backup),
+                includes=[
+                    "operation health snapshot",
+                    "provider configuration",
+                    "reviewed export bundle",
+                    "retention plan",
+                ],
+                download_url=f"/fraud-monitor/operations/backups/{backup.name}",
+            )
+        )
+    return artifacts
+
+
+def retention_candidate_id(path: Path) -> str:
+    relative = path.relative_to(operation_exports_dir()).as_posix()
+    return hashlib.sha256(relative.encode("utf-8")).hexdigest()[:16]
+
+
+def list_retention_candidates(max_age_days: int = 0) -> list[OperationsRetentionCandidate]:
+    exports_dir = operation_exports_dir()
+    now = datetime.now(UTC)
+    candidates: list[OperationsRetentionCandidate] = []
+    for path in sorted(exports_dir.glob("fraud-monitor-backup-*.json")):
+        created = datetime.fromtimestamp(path.stat().st_mtime, UTC)
+        age_days = (now - created).days
+        if age_days < max_age_days:
+            continue
+        candidates.append(
+            OperationsRetentionCandidate(
+                id=retention_candidate_id(path),
+                filename=path.name,
+                path=str(path),
+                reason=(
+                    "Generated local operations backup. Review before cleanup; "
+                    "deleting it does not delete the live database."
+                ),
+                byte_size=path.stat().st_size,
+                created_at=created.isoformat(timespec="seconds").replace("+00:00", "Z"),
+            )
+        )
+    return candidates
+
+
+def resolve_retention_candidate(candidate_id: str) -> Path | None:
+    for candidate in list_retention_candidates(max_age_days=0):
+        if candidate.id == candidate_id:
+            path = Path(candidate.path).resolve()
+            exports_dir = operation_exports_dir().resolve()
+            if exports_dir in path.parents and path.is_file():
+                return path
+    return None
+
+
+def build_database_health(connection: sqlite3.Connection) -> OperationsDatabaseHealth:
+    settings = get_settings()
+    case_count = int(connection.execute("SELECT COUNT(*) AS count FROM cases").fetchone()["count"])
+    result_count = int(connection.execute("SELECT COUNT(*) AS count FROM news_results").fetchone()["count"])
+    evidence_total = int(connection.execute("SELECT COUNT(*) AS count FROM evidence_links").fetchone()["count"])
+    job_count = int(connection.execute("SELECT COUNT(*) AS count FROM fraud_monitor_jobs").fetchone()["count"])
+    database_path = settings.database_path
+    exists = database_path.exists()
+    return OperationsDatabaseHealth(
+        status="ok" if exists else "error",
+        path=str(database_path),
+        exists=exists,
+        byte_size=database_path.stat().st_size if exists else 0,
+        case_count=case_count,
+        result_count=result_count,
+        evidence_count=evidence_total,
+        job_count=job_count,
+        checked_at=utc_now(),
+    )
+
+
+def build_data_directory_health() -> OperationsDataDirectoryHealth:
+    data_dir = get_settings().data_dir
+    data_dir.mkdir(parents=True, exist_ok=True)
+    probe = data_dir / ".write-test"
+    writable = False
+    try:
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+        writable = True
+    except OSError:
+        writable = False
+    return OperationsDataDirectoryHealth(
+        status="ok" if data_dir.exists() and writable else "error",
+        path=str(data_dir),
+        exists=data_dir.exists(),
+        writable=writable,
+        file_count=path_file_count(data_dir),
+        byte_size=path_byte_size(data_dir),
+    )
+
+
+def build_scheduler_health(settings_row: dict[str, Any]) -> OperationsSchedulerHealth:
+    enabled = bool(settings_row["enabled"])
+    job_running = _job_lock.locked()
+    task_active = _scheduler_task is not None and not _scheduler_task.done()
+    if job_running:
+        status_value: Literal["idle", "running", "disabled"] = "running"
+    elif enabled:
+        status_value = "idle"
+    else:
+        status_value = "disabled"
+    return OperationsSchedulerHealth(
+        status=status_value,
+        enabled=enabled,
+        task_active=task_active,
+        job_running=job_running,
+        interval_minutes=int(settings_row["interval_minutes"]),
+        next_run_at=settings_row["next_run_at"],
+        last_completed_at=settings_row["last_completed_at"],
+    )
+
+
+def build_operation_warnings(
+    validation: FraudMonitorConfigurationValidation,
+    data_directory: OperationsDataDirectoryHealth,
+    database: OperationsDatabaseHealth,
+) -> list[OperationsWarning]:
+    warnings = [
+        OperationsWarning(severity=issue.severity, message=f"{issue.provider}: {issue.message}")
+        for issue in validation.issues
+    ]
+    if data_directory.status != "ok":
+        warnings.append(
+            OperationsWarning(
+                severity="error",
+                message="Data directory is not writable; scans, backups, and cleanup may fail.",
+            )
+        )
+    if database.status != "ok":
+        warnings.append(
+            OperationsWarning(
+                severity="error",
+                message="SQLite database is missing or unavailable.",
+            )
+        )
+    if not warnings:
+        warnings.append(
+            OperationsWarning(
+                severity="info",
+                message="Operations checks are local-only and found no immediate maintenance warnings.",
+            )
+        )
+    return warnings
+
+
+def build_operations_status(
+    connection: sqlite3.Connection,
+    settings_row: dict[str, Any],
+    providers: list[ProviderInfo],
+) -> OperationsStatus:
+    validation = validate_configuration(providers)
+    data_directory = build_data_directory_health()
+    database = build_database_health(connection)
+    return OperationsStatus(
+        generated_at=utc_now(),
+        local_only=True,
+        data_directory=data_directory,
+        database=database,
+        scheduler=build_scheduler_health(settings_row),
+        warnings=build_operation_warnings(validation, data_directory, database),
+        backups=list_operation_backups(),
+        retention_candidates=list_retention_candidates(max_age_days=0),
+    )
 
 
 def row_to_timeline_event(row: sqlite3.Row) -> TimelineEventRecord:
@@ -1418,6 +1718,7 @@ def build_dashboard(
         ]
         detailed_provider = provider_info("brave", connection, case_id, settings["next_run_at"])
         configuration_validation = validate_configuration(providers)
+        operations = build_operations_status(connection, settings, providers)
 
     trend_summary = get_news_trends(case_id)
     ready_provider_count = len(provider_names_for_run())
@@ -1447,6 +1748,7 @@ def build_dashboard(
         not_relevant_results=counts["not_relevant"],
         findings=findings,
         timeline_events=timeline_events,
+        operations=operations,
     )
 
 
@@ -1738,6 +2040,102 @@ def export_markdown_report() -> PlainTextResponse:
         export_bundle_to_markdown(build_export_bundle()),
         media_type="text/markdown; charset=utf-8",
         headers={"Content-Disposition": 'attachment; filename="fraud-monitor-export.md"'},
+    )
+
+
+@router.get("/operations", response_model=OperationsStatus)
+def get_operations_status() -> OperationsStatus:
+    with connect() as connection:
+        settings = ensure_monitor_settings(connection)
+        case_id = settings["case_id"]
+        providers = [
+            provider_info(provider, connection, case_id, settings["next_run_at"])
+            for provider in configured_providers()
+        ]
+        return build_operations_status(connection, settings, providers)
+
+
+@router.post("/operations/backups", response_model=OperationsBackupArtifact, status_code=status.HTTP_201_CREATED)
+def create_operations_backup(payload: OperationsBackupCreate | None = None) -> OperationsBackupArtifact:
+    note = payload.note if payload is not None else ""
+    generated_at = utc_now()
+    safe_stamp = generated_at.replace(":", "").replace("-", "").replace("Z", "Z")
+    filename = f"fraud-monitor-backup-{safe_stamp}.json"
+    path = operation_exports_dir() / filename
+    with connect() as connection:
+        settings = ensure_monitor_settings(connection)
+        case_id = settings["case_id"]
+        providers = [
+            provider_info(provider, connection, case_id, settings["next_run_at"])
+            for provider in configured_providers()
+        ]
+        operations = build_operations_status(connection, settings, providers)
+
+    bundle = build_export_bundle()
+    payload_json = {
+        "metadata": {
+            "generated_at": generated_at,
+            "note": note,
+            "local_only": True,
+            "includes": [
+                "operation health snapshot",
+                "provider configuration",
+                "reviewed export bundle",
+                "retention plan",
+            ],
+            "responsible_use": (
+                "This artifact is generated locally. Review and redact before sharing outside "
+                "the local investigation context."
+            ),
+        },
+        "operations": operations.model_dump(mode="json"),
+        "export_bundle": bundle.model_dump(mode="json"),
+    }
+    path.write_text(json.dumps(payload_json, indent=2, sort_keys=True), encoding="utf-8")
+    return OperationsBackupArtifact(
+        filename=path.name,
+        path=str(path),
+        byte_size=path.stat().st_size,
+        created_at=backup_created_at(path),
+        includes=payload_json["metadata"]["includes"],
+        download_url=f"/fraud-monitor/operations/backups/{path.name}",
+    )
+
+
+@router.get("/operations/backups/{filename}", response_class=PlainTextResponse)
+def download_operations_backup(filename: str) -> PlainTextResponse:
+    if "/" in filename or "\\" in filename or not filename.startswith("fraud-monitor-backup-"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Backup artifact not found.")
+    path = (operation_exports_dir() / filename).resolve()
+    exports_dir = operation_exports_dir().resolve()
+    if exports_dir not in path.parents or not path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Backup artifact not found.")
+    return PlainTextResponse(
+        path.read_text(encoding="utf-8"),
+        media_type="application/json; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{path.name}"'},
+    )
+
+
+@router.delete("/operations/retention-candidates", response_model=OperationsCleanupResult)
+def cleanup_retention_candidates(payload: OperationsCleanupRequest) -> OperationsCleanupResult:
+    deleted_count = 0
+    deleted_bytes = 0
+    for candidate_id in dict.fromkeys(payload.candidate_ids):
+        path = resolve_retention_candidate(candidate_id)
+        if path is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="One or more retention candidates were not found.",
+            )
+        size = path.stat().st_size
+        path.unlink()
+        deleted_count += 1
+        deleted_bytes += size
+    return OperationsCleanupResult(
+        deleted_count=deleted_count,
+        deleted_bytes=deleted_bytes,
+        remaining_candidates=list_retention_candidates(max_age_days=0),
     )
 
 
