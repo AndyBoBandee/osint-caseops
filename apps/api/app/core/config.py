@@ -16,7 +16,7 @@ class Settings:
         self.brave_search_api_key = getenv("BRAVE_SEARCH_API_KEY", "")
         self.news_search_max_results = int(getenv("OSINT_CASEOPS_NEWS_MAX_RESULTS", "10"))
         self.enable_fixture_provider = getenv("OSINT_CASEOPS_ENABLE_FIXTURE_PROVIDER", "") == "1"
-        providers = getenv("OSINT_CASEOPS_FRAUD_MONITOR_PROVIDERS", "brave,hn_algolia")
+        providers = getenv("OSINT_CASEOPS_FRAUD_MONITOR_PROVIDERS", "gdelt,google_news_rss,hn_algolia")
         self.fraud_monitor_providers = [
             provider.strip().lower() for provider in providers.split(",") if provider.strip()
         ]

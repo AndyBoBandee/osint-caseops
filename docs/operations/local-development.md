@@ -74,22 +74,22 @@ data/cases/{case_id}/
 ## Fraud Monitor Providers
 
 The current app surface is the Fraud Monitor dashboard. It uses passive HTTP GET requests to public
-search providers for the fixed keyword `fraud`. Default providers are:
+search providers for the fixed keyword `fraud`. Default providers are the no-key options:
 
-- `brave` for Brave News Search when `BRAVE_SEARCH_API_KEY` is configured.
-- `hn_algolia` as the no-key fallback.
+- `gdelt` for the GDELT document API.
+- `google_news_rss` for Google News RSS search.
+- `hn_algolia` for Hacker News Algolia search.
 
 Configure the dashboard provider list with:
 
 ```sh
-export BRAVE_SEARCH_API_KEY="your-local-key"
-export OSINT_CASEOPS_FRAUD_MONITOR_PROVIDERS=brave,hn_algolia
-make dev
+OSINT_CASEOPS_FRAUD_MONITOR_PROVIDERS=gdelt,google_news_rss,hn_algolia
 ```
 
 Keep the real Brave key in your local shell, password manager, or uncommitted environment file. The
 API reads `BRAVE_SEARCH_API_KEY` from the process environment, and Docker Compose passes the variable
-through when it is set. Do not commit the key.
+through when it is set. Do not commit the key. A saved Brave key is used only when the user requests
+a detailed search from the dashboard or API.
 
 Use `OSINT_CASEOPS_NEWS_MAX_RESULTS` to cap results per provider. Use
 `OSINT_CASEOPS_FRAUD_MONITOR_SCHEDULER_SECONDS` to tune how often the API checks for due scheduled
@@ -106,7 +106,8 @@ Provider behavior is deliberately passive and bounded:
 | `brave` | `GET https://api.search.brave.com/res/v1/news/search` | `BRAVE_SEARCH_API_KEY` required | Up to `min(OSINT_CASEOPS_NEWS_MAX_RESULTS, 20)` news results for the fixed keyword | 8 seconds | Optional provider; API key must stay local and out of commits. |
 | `fixture` | None | `OSINT_CASEOPS_ENABLE_FIXTURE_PROVIDER=1` required | Up to 2 deterministic local records | Not networked | Test-only public-source-style data for smoke and fixture coverage. |
 
-The Fraud Monitor uses provider-specific query text before each request. Brave receives a
+The Fraud Monitor uses provider-specific query text before each request. Standard scans use the
+configured no-key providers. Detailed searches use Brave only when requested and receive a
 report-oriented query for the fixed keyword: `fraud (report OR warning OR investigation OR charged OR lawsuit OR enforcement)`.
 Before storing results, the API deterministically filters obvious static assets and non-news records
 such as JavaScript, CSS, image/font/document files, `/static/` or `/assets/` paths, CDN-style asset

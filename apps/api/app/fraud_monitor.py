@@ -45,6 +45,7 @@ FRAUD_MONITOR_CASE_ID = "fraud-monitor-system-case"
 DEFAULT_INTERVAL_MINUTES = 60
 
 TriggerType = Literal["manual", "scheduled"]
+SearchMode = Literal["standard", "detailed"]
 ProviderStatus = Literal["ready", "missing_config", "unsupported", "timeout", "partial_success"]
 EvidenceFilter = Literal["all", "saved", "unsaved"]
 ValidationSeverity = Literal["error", "warning", "info"]
@@ -149,6 +150,10 @@ class FraudMonitorJob(BaseModel):
     provider_run_summaries: list[FraudMonitorProviderRunSummary] = Field(default_factory=list)
 
 
+class FraudMonitorJobCreate(BaseModel):
+    search_mode: SearchMode = "standard"
+
+
 class FraudMonitorResultPage(BaseModel):
     total_matching: int
     limit: int
@@ -166,6 +171,7 @@ class FraudMonitorDashboard(BaseModel):
     keyword: str
     case_id: str
     providers: list[ProviderInfo]
+    detailed_provider: ProviderInfo
     configuration_validation: FraudMonitorConfigurationValidation
     schedule: FraudMonitorSchedule
     latest_job: FraudMonitorJob | None
@@ -341,6 +347,12 @@ def provider_info(
 
 def provider_names_for_run() -> list[str]:
     return [info.name for info in map(provider_info, configured_providers()) if info.status == "ready"]
+
+
+def provider_names_for_search_mode(search_mode: SearchMode) -> list[str]:
+    if search_mode == "detailed":
+        return ["brave"] if provider_info("brave").status == "ready" else []
+    return provider_names_for_run()
 
 
 def validate_configuration(providers: list[ProviderInfo] | None = None) -> FraudMonitorConfigurationValidation:
@@ -835,20 +847,25 @@ def create_provider_run(
     return run_id, run_status, len(stored_results), error_message
 
 
-def run_fraud_monitor_job_locked(trigger_type: TriggerType = "manual") -> FraudMonitorJob:
+def run_fraud_monitor_job_locked(
+    trigger_type: TriggerType = "manual",
+    search_mode: SearchMode = "standard",
+) -> FraudMonitorJob:
     job_id = str(uuid4())
     started_at = utc_now()
 
     with connect() as connection:
         settings = ensure_monitor_settings(connection)
         case_id = settings["case_id"]
-        providers = provider_names_for_run()
+        providers = provider_names_for_search_mode(search_mode)
         errors: list[str] = []
         result_count = 0
         successful_provider_runs = 0
         run_ids: list[tuple[str, str]] = []
 
-        if not providers:
+        if not providers and search_mode == "detailed":
+            errors.append("Detailed search requires BRAVE_SEARCH_API_KEY before using Brave News Search.")
+        elif not providers:
             errors.append("No ready fraud monitor providers are configured.")
 
         connection.execute(
@@ -937,14 +954,17 @@ def run_fraud_monitor_job_locked(trigger_type: TriggerType = "manual") -> FraudM
     return row_to_job(row, [provider for _, provider in run_ids])
 
 
-def create_fraud_monitor_job(trigger_type: TriggerType = "manual") -> FraudMonitorJob:
+def create_fraud_monitor_job(
+    trigger_type: TriggerType = "manual",
+    search_mode: SearchMode = "standard",
+) -> FraudMonitorJob:
     if not _job_lock.acquire(blocking=False):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="A fraud monitor job is already running.",
         )
     try:
-        return run_fraud_monitor_job_locked(trigger_type)
+        return run_fraud_monitor_job_locked(trigger_type, search_mode)
     finally:
         _job_lock.release()
 
@@ -980,6 +1000,7 @@ def build_dashboard(
             provider_info(provider, connection, case_id, settings["next_run_at"])
             for provider in configured_providers()
         ]
+        detailed_provider = provider_info("brave", connection, case_id, settings["next_run_at"])
         configuration_validation = validate_configuration(providers)
 
     trend_summary = get_news_trends(case_id)
@@ -989,6 +1010,7 @@ def build_dashboard(
         keyword=FRAUD_KEYWORD,
         case_id=case_id,
         providers=providers,
+        detailed_provider=detailed_provider,
         configuration_validation=configuration_validation,
         schedule=row_to_schedule(settings),
         latest_job=jobs[0] if jobs else None,
@@ -1238,8 +1260,9 @@ def get_configuration_validation() -> FraudMonitorConfigurationValidation:
 
 
 @router.post("/jobs", response_model=FraudMonitorJob)
-def create_job() -> FraudMonitorJob:
-    return create_fraud_monitor_job("manual")
+def create_job(payload: FraudMonitorJobCreate | None = None) -> FraudMonitorJob:
+    search_mode = payload.search_mode if payload is not None else "standard"
+    return create_fraud_monitor_job("manual", search_mode)
 
 
 @router.patch("/schedule", response_model=FraudMonitorSchedule)

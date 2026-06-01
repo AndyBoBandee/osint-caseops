@@ -164,6 +164,7 @@ export function FraudMonitorDashboard({
   const [dashboard, setDashboard] = useState(initialDashboard);
   const [resultQuery, setResultQuery] = useState<ResultQuery>(() => makeInitialQuery(initialDashboard));
   const [isRunning, setIsRunning] = useState(false);
+  const [isRunningDetailed, setIsRunningDetailed] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSavingSchedule, setIsSavingSchedule] = useState(false);
   const [exportingFormat, setExportingFormat] = useState<"markdown" | "json" | null>(null);
@@ -199,7 +200,17 @@ export function FraudMonitorDashboard({
   }, [dashboard.providers, dashboard.results]);
   const visibleResultIds = useMemo(() => dashboard.results.map((result) => result.id), [dashboard.results]);
   const selectedVisibleCount = selectedResultIds.filter((id) => visibleResultIds.includes(id)).length;
-  const runDisabled = isRunning || dashboard.runtime.is_running || dashboard.runtime.ready_provider_count === 0;
+  const showDetailedProvider = !dashboard.providers.some((provider) => provider.name === dashboard.detailed_provider.name);
+  const runDisabled =
+    isRunning ||
+    isRunningDetailed ||
+    dashboard.runtime.is_running ||
+    dashboard.runtime.ready_provider_count === 0;
+  const detailedDisabled =
+    isRunning ||
+    isRunningDetailed ||
+    dashboard.runtime.is_running ||
+    dashboard.detailed_provider.status !== "ready";
 
   async function refreshDashboard(nextQuery: ResultQuery = resultQuery) {
     const nextDashboard = await apiRequest<FraudMonitorDashboardData>(dashboardPath(nextQuery));
@@ -240,22 +251,34 @@ export function FraudMonitorDashboard({
     }
   }
 
-  async function runNow() {
-    setIsRunning(true);
+  async function runNow(searchMode: "standard" | "detailed" = "standard") {
+    const detailed = searchMode === "detailed";
+    if (detailed) {
+      setIsRunningDetailed(true);
+    } else {
+      setIsRunning(true);
+    }
     setNotice("");
     setError("");
     try {
-      const job = await apiRequest<FraudMonitorJob>("/fraud-monitor/jobs", { method: "POST" });
+      const job = await apiRequest<FraudMonitorJob>("/fraud-monitor/jobs", {
+        method: "POST",
+        body: JSON.stringify({ search_mode: searchMode }),
+      });
       await refreshDashboard();
       setNotice(
         job.status === "success"
-          ? `Stored ${job.result_count} fraud result(s).`
-          : `Fraud scan finished with ${job.status} status.`,
+          ? `${detailed ? "Detailed search" : "Free-provider scan"} stored ${job.result_count} fraud result(s).`
+          : `${detailed ? "Detailed search" : "Fraud scan"} finished with ${job.status} status.`,
       );
     } catch (caught) {
-      setError(getRequestError(caught, "Could not run fraud scan."));
+      setError(getRequestError(caught, detailed ? "Could not run detailed search." : "Could not run fraud scan."));
     } finally {
-      setIsRunning(false);
+      if (detailed) {
+        setIsRunningDetailed(false);
+      } else {
+        setIsRunning(false);
+      }
     }
   }
 
@@ -478,8 +501,21 @@ export function FraudMonitorDashboard({
             <h1>fraud</h1>
           </div>
           <div className="fm-header-actions">
-            <button className="oc-btn oc-btn-primary" disabled={runDisabled} onClick={runNow} type="button">
+            <button
+              className="oc-btn oc-btn-primary"
+              disabled={runDisabled}
+              onClick={() => void runNow("standard")}
+              type="button"
+            >
               {isRunning || dashboard.runtime.is_running ? "Running" : "Run now"}
+            </button>
+            <button
+              className="oc-btn"
+              disabled={detailedDisabled}
+              onClick={() => void runNow("detailed")}
+              type="button"
+            >
+              {isRunningDetailed ? "Running detailed" : "Run detailed"}
             </button>
             <button className="oc-btn" disabled={isRefreshing} onClick={() => void handleRefresh()} type="button">
               {isRefreshing ? "Refreshing" : "Refresh"}
@@ -582,7 +618,7 @@ export function FraudMonitorDashboard({
             <div className="oc-card-header">
               <div>
                 <h2 className="oc-card-title">Providers</h2>
-                <p className="oc-card-description">No-key providers run by default.</p>
+                <p className="oc-card-description">Free providers run by default.</p>
               </div>
               <span className={dashboard.configuration_validation.is_valid ? "oc-badge oc-badge-success" : "oc-badge oc-badge-danger"}>
                 {dashboard.configuration_validation.is_valid ? "Config ok" : "Config attention"}
@@ -592,6 +628,10 @@ export function FraudMonitorDashboard({
               {dashboard.providers.map((provider) => (
                 <ProviderRow key={provider.name} provider={provider} />
               ))}
+              {showDetailedProvider ? <ProviderRow provider={dashboard.detailed_provider} /> : null}
+              {dashboard.detailed_provider.status !== "ready" ? (
+                <p className="oc-empty-state">Detailed search uses Brave only when the local API key is configured.</p>
+              ) : null}
               {dashboard.configuration_validation.issues.map((issue) => (
                 <div className="oc-module-row" key={`${issue.provider}:${issue.message}`}>
                   <div>

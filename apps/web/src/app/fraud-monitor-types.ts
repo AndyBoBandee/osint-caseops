@@ -145,6 +145,7 @@ export type FraudMonitorDashboardData = {
   keyword: string;
   case_id: string;
   providers: ProviderInfo[];
+  detailed_provider: ProviderInfo;
   configuration_validation: FraudMonitorConfigurationValidation;
   schedule: FraudMonitorSchedule;
   latest_job: FraudMonitorJob | null;
