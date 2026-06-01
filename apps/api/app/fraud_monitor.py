@@ -196,6 +196,8 @@ class FraudMonitorEvidenceTableRow(BaseModel):
     provider: str
     review_status: ReviewStatus
     classification_label: str
+    fraud_state_label: str
+    fraud_state_code: str
     analyst_note: str
     retrieved_at: str
     published_at: str
@@ -527,11 +529,17 @@ def build_result_filters(
                 OR LOWER(news_results.theme) LIKE ?
                 OR LOWER(news_results.classification_label) LIKE ?
                 OR LOWER(news_results.classification_terms_json) LIKE ?
+                OR LOWER(news_results.fraud_state_label) LIKE ?
+                OR LOWER(news_results.fraud_state_code) LIKE ?
+                OR LOWER(news_results.fraud_state_terms_json) LIKE ?
             )"""
         )
         search_param = f"%{cleaned_search.lower()}%"
         params.extend(
             [
+                search_param,
+                search_param,
+                search_param,
                 search_param,
                 search_param,
                 search_param,
@@ -986,6 +994,8 @@ def build_export_bundle() -> FraudMonitorExportBundle:
                 provider=result["provider"],
                 review_status=result["review_status"],
                 classification_label=result["classification_label"],
+                fraud_state_label=result["fraud_state_label"],
+                fraud_state_code=result["fraud_state_code"],
                 analyst_note=result["evidence_analyst_note"],
                 retrieved_at=result["retrieved_at"],
                 published_at=result["published_at"],
@@ -1097,6 +1107,7 @@ def export_bundle_to_markdown(bundle: FraudMonitorExportBundle) -> str:
                 [
                     "Title",
                     "Reported category",
+                    "Reported state",
                     "Source URL",
                     "Provider",
                     "Review",
@@ -1108,6 +1119,7 @@ def export_bundle_to_markdown(bundle: FraudMonitorExportBundle) -> str:
                     [
                         row.title,
                         row.classification_label,
+                        row.fraud_state_label,
                         row.source_url,
                         row.provider,
                         row.review_status,

@@ -650,7 +650,7 @@ export function FraudMonitorDashboard({
               <input
                 className="oc-input"
                 onChange={(event) => setSearchDraft(event.target.value)}
-                placeholder="Title, source, category, theme"
+                placeholder="Title, source, category, state, theme"
                 value={searchDraft}
               />
             </label>
@@ -790,6 +790,9 @@ export function FraudMonitorDashboard({
                         {result.source_quality === "named_source" ? "Named source" : "Source review"}
                       </span>
                       <span className="oc-badge oc-badge-info">Reported category: {result.classification_label}</span>
+                      <span className={result.fraud_state_code ? "oc-badge oc-badge-info" : "oc-badge oc-badge-muted"}>
+                        Reported state: {result.fraud_state_label || "Unknown"}
+                      </span>
                     </div>
                     <h3>{result.title || sourceSummary(result.source_url)}</h3>
                   </div>
@@ -804,6 +807,7 @@ export function FraudMonitorDashboard({
                   <span>Retrieved {compactDate(result.retrieved_at)}</span>
                   <span>Theme {result.theme || "uncategorized"}</span>
                   <span>Basis {result.classification_basis}</span>
+                  <span>State basis {result.fraud_state_basis}</span>
                 </div>
                 <p className="oc-empty-state">{result.prioritization_cue}</p>
                 <div className="fm-source-row">

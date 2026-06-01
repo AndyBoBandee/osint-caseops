@@ -88,6 +88,147 @@ def test_manual_fraud_job_runs_configured_providers_and_stores_results(
     assert {result["provider"] for result in dashboard["results"]} == {"gdelt", "hn_algolia"}
 
 
+def test_fraud_results_store_source_derived_state_metadata_and_search(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    def fake_search(keyword: str, provider: str) -> list[ProviderResult]:
+        return [
+            ProviderResult(
+                keyword=keyword,
+                source_url="https://gdelt.example/california-fraud-report",
+                publisher="Public Source",
+                title="California lending fraud report",
+                snippet="Public reporting describes a fraud pattern.",
+                published_at="2026-05-30T12:00:00Z",
+                retrieved_at="2026-05-30T12:05:00Z",
+            ),
+            ProviderResult(
+                keyword=keyword,
+                source_url="https://gdelt.example/new-york-warning",
+                publisher="Public Source",
+                title="Agency fraud warning",
+                snippet="Public reporting describes a New York fraud pattern.",
+                published_at="2026-05-30T12:00:00Z",
+                retrieved_at="2026-05-30T12:06:00Z",
+            ),
+            ProviderResult(
+                keyword=keyword,
+                source_url="https://gdelt.example/provider-warning",
+                publisher="Texas Tribune",
+                title="Public fraud warning",
+                snippet="Public reporting describes analyst review needs.",
+                published_at="2026-05-30T12:00:00Z",
+                retrieved_at="2026-05-30T12:07:00Z",
+            ),
+            ProviderResult(
+                keyword=keyword,
+                source_url="https://gdelt.example/washington-dc/fraud-warning",
+                publisher="Public Source",
+                title="Public fraud warning",
+                snippet="Public reporting describes analyst review needs.",
+                published_at="2026-05-30T12:00:00Z",
+                retrieved_at="2026-05-30T12:08:00Z",
+            ),
+            ProviderResult(
+                keyword=keyword,
+                source_url="https://gdelt.example/fraud-warning",
+                publisher="Public Source",
+                title="Public fraud warning",
+                snippet="Public reporting describes analyst review needs.",
+                published_at="2026-05-30T12:00:00Z",
+                retrieved_at="2026-05-30T12:09:00Z",
+            ),
+        ]
+
+    monkeypatch.setattr(fraud_monitor, "search_public_news_with_provider", fake_search)
+
+    with make_client(tmp_path, monkeypatch, providers="gdelt") as client:
+        run_response = client.post("/fraud-monitor/jobs")
+        dashboard = client.get("/fraud-monitor/dashboard?limit=100").json()
+        california_search = client.get("/fraud-monitor/dashboard?search=california&limit=100").json()
+
+    assert run_response.status_code == 200
+    results_by_url = {result["source_url"]: result for result in dashboard["results"]}
+    california = results_by_url["https://gdelt.example/california-fraud-report"]
+    assert california["fraud_state_code"] == "CA"
+    assert california["fraud_state_label"] == "California"
+    assert california["fraud_state_basis"] == "title"
+    assert california["fraud_state_terms"] == ["California"]
+
+    new_york = results_by_url["https://gdelt.example/new-york-warning"]
+    assert new_york["fraud_state_code"] == "NY"
+    assert new_york["fraud_state_label"] == "New York"
+    assert new_york["fraud_state_basis"] == "snippet"
+
+    texas = results_by_url["https://gdelt.example/provider-warning"]
+    assert texas["fraud_state_code"] == "TX"
+    assert texas["fraud_state_basis"] == "publisher"
+
+    district = results_by_url["https://gdelt.example/washington-dc/fraud-warning"]
+    assert district["fraud_state_code"] == "DC"
+    assert district["fraud_state_label"] == "District of Columbia"
+    assert district["fraud_state_basis"] == "source_url"
+
+    unknown = results_by_url["https://gdelt.example/fraud-warning"]
+    assert unknown["fraud_state_code"] == ""
+    assert unknown["fraud_state_label"] == "Unknown"
+    assert unknown["fraud_state_basis"] == "unknown"
+    assert unknown["fraud_state_terms"] == []
+
+    assert california_search["result_page"]["total_matching"] == 1
+    assert california_search["results"][0]["fraud_state_label"] == "California"
+
+
+def test_duplicate_fraud_result_refreshes_state_metadata_without_resetting_review(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    calls = {"count": 0}
+
+    def fake_search(keyword: str, provider: str) -> list[ProviderResult]:
+        calls["count"] += 1
+        state = "California" if calls["count"] == 1 else "Florida"
+        return [
+            ProviderResult(
+                keyword=keyword,
+                source_url="https://gdelt.example/repeated-fraud-report",
+                publisher="Public Source",
+                title=f"{state} lending fraud report",
+                snippet="Public reporting describes a fraud pattern.",
+                published_at="2026-05-30T12:00:00Z",
+                retrieved_at=f"2026-05-30T12:0{calls['count']}:00Z",
+            )
+        ]
+
+    monkeypatch.setattr(fraud_monitor, "search_public_news_with_provider", fake_search)
+
+    with make_client(tmp_path, monkeypatch, providers="gdelt") as client:
+        first_run = client.post("/fraud-monitor/jobs")
+        first_result = client.get("/fraud-monitor/dashboard").json()["results"][0]
+        result_id = first_result["id"]
+        client.patch(
+            f"/fraud-monitor/results/{result_id}",
+            json={"review_status": "relevant"},
+        )
+        client.post(
+            f"/fraud-monitor/results/{result_id}/evidence-links",
+            json={"analyst_note": "Preserve this reviewed source."},
+        )
+        second_run = client.post("/fraud-monitor/jobs")
+        updated_result = client.get("/fraud-monitor/dashboard").json()["results"][0]
+
+    assert first_run.status_code == 200
+    assert second_run.status_code == 200
+    assert updated_result["id"] == result_id
+    assert updated_result["review_status"] == "relevant"
+    assert updated_result["saved_as_evidence"] is True
+    assert updated_result["evidence_analyst_note"] == "Preserve this reviewed source."
+    assert updated_result["seen_count"] == 2
+    assert updated_result["fraud_state_code"] == "FL"
+    assert updated_result["fraud_state_label"] == "Florida"
+
+
 def test_fraud_job_records_partial_provider_failures(tmp_path: Path, monkeypatch) -> None:
     def fake_search(keyword: str, provider: str) -> list[ProviderResult]:
         if provider == "gdelt":
@@ -374,7 +515,7 @@ def test_exports_include_reviewed_results_metadata_trends_and_escaped_markdown(
                 keyword=keyword,
                 source_url="https://gdelt.example/fraud-report",
                 publisher="GDELT | Example",
-                title="Agency | charged lending fraud\nwarning",
+                title="California agency | charged lending fraud\nwarning",
                 snippet="Public reporting describes a fraud pattern for analyst review.",
                 published_at="2026-05-30T12:00:00Z",
                 retrieved_at="2026-05-30T12:05:00Z",
@@ -408,15 +549,19 @@ def test_exports_include_reviewed_results_metadata_trends_and_escaped_markdown(
     assert bundle["evidence_table"][0]["provider"] == "gdelt"
     assert bundle["evidence_table"][0]["review_status"] == "relevant"
     assert bundle["evidence_table"][0]["classification_label"] == "lending fraud"
+    assert bundle["evidence_table"][0]["fraud_state_label"] == "California"
+    assert bundle["evidence_table"][0]["fraud_state_code"] == "CA"
     assert bundle["evidence_table"][0]["analyst_note"] == "Analyst | note\nwith newline."
-    assert bundle["reviewed_results"][0]["title"] == "Agency | charged lending fraud\nwarning"
+    assert bundle["reviewed_results"][0]["title"] == "California agency | charged lending fraud\nwarning"
     assert bundle["reviewed_results"][0]["classification_label"] == "lending fraud"
+    assert bundle["reviewed_results"][0]["fraud_state_label"] == "California"
     assert any("analyst review required" in group["confidence_language"] for group in bundle["trend_summary"]["groups"])
 
     assert markdown_response.status_code == 200
     assert markdown_response.headers["content-disposition"] == 'attachment; filename="fraud-monitor-export.md"'
-    assert "Agency \\| charged lending fraud warning" in markdown_response.text
+    assert "California agency \\| charged lending fraud warning" in markdown_response.text
     assert "lending fraud" in markdown_response.text
+    assert "California" in markdown_response.text
     assert "Analyst \\| note with newline." in markdown_response.text
     assert "Public results are leads for analyst review" in markdown_response.text
 

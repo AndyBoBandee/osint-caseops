@@ -192,7 +192,15 @@ Fields:
 - classification_label.
 - classification_basis.
 - classification_terms.
+- fraud_state_code.
+- fraud_state_label.
+- fraud_state_basis.
+- fraud_state_terms.
 - created_at.
+
+Fraud state metadata is source-derived from the result title, snippet, publisher, or source URL. It
+stores a US state or Washington DC only when a clear full-name match exists; otherwise the reported
+state is unknown. It is not an analyst-confirmed assertion about where fraud occurred.
 
 ## Evidence Link
 

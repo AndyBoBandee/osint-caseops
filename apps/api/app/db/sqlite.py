@@ -131,6 +131,10 @@ def initialize_database() -> None:
                 classification_label TEXT NOT NULL DEFAULT 'general fraud reporting',
                 classification_basis TEXT NOT NULL DEFAULT 'fallback',
                 classification_terms_json TEXT NOT NULL DEFAULT '[]',
+                fraud_state_code TEXT NOT NULL DEFAULT '',
+                fraud_state_label TEXT NOT NULL DEFAULT '',
+                fraud_state_basis TEXT NOT NULL DEFAULT 'unknown',
+                fraud_state_terms_json TEXT NOT NULL DEFAULT '[]',
                 created_at TEXT NOT NULL,
                 UNIQUE(case_id, source_url, keyword)
             );
@@ -229,6 +233,30 @@ def initialize_database() -> None:
             connection,
             "news_results",
             "classification_terms_json",
+            "TEXT NOT NULL DEFAULT '[]'",
+        )
+        ensure_column(
+            connection,
+            "news_results",
+            "fraud_state_code",
+            "TEXT NOT NULL DEFAULT ''",
+        )
+        ensure_column(
+            connection,
+            "news_results",
+            "fraud_state_label",
+            "TEXT NOT NULL DEFAULT ''",
+        )
+        ensure_column(
+            connection,
+            "news_results",
+            "fraud_state_basis",
+            "TEXT NOT NULL DEFAULT 'unknown'",
+        )
+        ensure_column(
+            connection,
+            "news_results",
+            "fraud_state_terms_json",
             "TEXT NOT NULL DEFAULT '[]'",
         )
 

@@ -92,6 +92,10 @@ export type NewsResultRecord = {
   classification_label: string;
   classification_basis: "title" | "snippet" | "fallback";
   classification_terms: string[];
+  fraud_state_code: string;
+  fraud_state_label: string;
+  fraud_state_basis: "title" | "snippet" | "publisher" | "source_url" | "unknown";
+  fraud_state_terms: string[];
   source_quality: "named_source" | "unnamed_source";
   recency_cue: "fresh" | "recent" | "older" | "unknown";
   prioritization_cue: string;

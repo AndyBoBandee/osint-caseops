@@ -6,7 +6,7 @@ import re
 import sqlite3
 from typing import Any, Literal
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import unquote, urlencode
 from urllib.request import Request, urlopen
 from uuid import uuid4
 from xml.etree import ElementTree
@@ -24,6 +24,7 @@ TrendGroupType = Literal["keyword", "classification", "source", "time_window", "
 SourceQuality = Literal["named_source", "unnamed_source"]
 RecencyCue = Literal["fresh", "recent", "older", "unknown"]
 ClassificationBasis = Literal["title", "snippet", "fallback"]
+FraudStateBasis = Literal["title", "snippet", "publisher", "source_url", "unknown"]
 
 NEWS_TIMEOUT_SECONDS = 8
 MAX_NEWS_BODY_BYTES = 512_000
@@ -141,6 +142,60 @@ FRAUD_CLASSIFICATION_RULES: list[tuple[str, list[tuple[str, str]]]] = [
     ),
 ]
 GENERAL_FRAUD_LABEL = "general fraud reporting"
+UNKNOWN_FRAUD_STATE_LABEL = "Unknown"
+US_STATE_TERMS: list[tuple[str, str, list[str]]] = [
+    ("AL", "Alabama", ["Alabama"]),
+    ("AK", "Alaska", ["Alaska"]),
+    ("AZ", "Arizona", ["Arizona"]),
+    ("AR", "Arkansas", ["Arkansas"]),
+    ("CA", "California", ["California"]),
+    ("CO", "Colorado", ["Colorado"]),
+    ("CT", "Connecticut", ["Connecticut"]),
+    ("DE", "Delaware", ["Delaware"]),
+    ("FL", "Florida", ["Florida"]),
+    ("GA", "Georgia", ["Georgia"]),
+    ("HI", "Hawaii", ["Hawaii"]),
+    ("ID", "Idaho", ["Idaho"]),
+    ("IL", "Illinois", ["Illinois"]),
+    ("IN", "Indiana", ["Indiana"]),
+    ("IA", "Iowa", ["Iowa"]),
+    ("KS", "Kansas", ["Kansas"]),
+    ("KY", "Kentucky", ["Kentucky"]),
+    ("LA", "Louisiana", ["Louisiana"]),
+    ("ME", "Maine", ["Maine"]),
+    ("MD", "Maryland", ["Maryland"]),
+    ("MA", "Massachusetts", ["Massachusetts"]),
+    ("MI", "Michigan", ["Michigan"]),
+    ("MN", "Minnesota", ["Minnesota"]),
+    ("MS", "Mississippi", ["Mississippi"]),
+    ("MO", "Missouri", ["Missouri"]),
+    ("MT", "Montana", ["Montana"]),
+    ("NE", "Nebraska", ["Nebraska"]),
+    ("NV", "Nevada", ["Nevada"]),
+    ("NH", "New Hampshire", ["New Hampshire"]),
+    ("NJ", "New Jersey", ["New Jersey"]),
+    ("NM", "New Mexico", ["New Mexico"]),
+    ("NY", "New York", ["New York"]),
+    ("NC", "North Carolina", ["North Carolina"]),
+    ("ND", "North Dakota", ["North Dakota"]),
+    ("OH", "Ohio", ["Ohio"]),
+    ("OK", "Oklahoma", ["Oklahoma"]),
+    ("OR", "Oregon", ["Oregon"]),
+    ("PA", "Pennsylvania", ["Pennsylvania"]),
+    ("RI", "Rhode Island", ["Rhode Island"]),
+    ("SC", "South Carolina", ["South Carolina"]),
+    ("SD", "South Dakota", ["South Dakota"]),
+    ("TN", "Tennessee", ["Tennessee"]),
+    ("TX", "Texas", ["Texas"]),
+    ("UT", "Utah", ["Utah"]),
+    ("VT", "Vermont", ["Vermont"]),
+    ("VA", "Virginia", ["Virginia"]),
+    ("WA", "Washington", ["Washington"]),
+    ("WV", "West Virginia", ["West Virginia"]),
+    ("WI", "Wisconsin", ["Wisconsin"]),
+    ("WY", "Wyoming", ["Wyoming"]),
+    ("DC", "District of Columbia", ["District of Columbia", "Washington DC", "Washington D.C."]),
+]
 
 router = APIRouter()
 
@@ -275,6 +330,10 @@ class NewsResultRecord(BaseModel):
     classification_label: str
     classification_basis: ClassificationBasis
     classification_terms: list[str]
+    fraud_state_code: str
+    fraud_state_label: str
+    fraud_state_basis: FraudStateBasis
+    fraud_state_terms: list[str]
     source_quality: SourceQuality
     recency_cue: RecencyCue
     prioritization_cue: str
@@ -394,10 +453,15 @@ def row_to_news_result(row: sqlite3.Row) -> dict[str, Any]:
     payload["classification_label"] = payload.get("classification_label") or GENERAL_FRAUD_LABEL
     payload["classification_basis"] = payload.get("classification_basis") or "fallback"
     payload["classification_terms"] = decode_json_list(payload.get("classification_terms_json") or "[]")
+    payload["fraud_state_code"] = payload.get("fraud_state_code") or ""
+    payload["fraud_state_label"] = payload.get("fraud_state_label") or UNKNOWN_FRAUD_STATE_LABEL
+    payload["fraud_state_basis"] = payload.get("fraud_state_basis") or "unknown"
+    payload["fraud_state_terms"] = decode_json_list(payload.get("fraud_state_terms_json") or "[]")
     payload["source_quality"] = source_quality(payload)
     payload["recency_cue"] = recency_cue(payload.get("published_at") or payload.get("retrieved_at", ""))
     payload["prioritization_cue"] = prioritization_cue(payload)
     payload.pop("classification_terms_json", None)
+    payload.pop("fraud_state_terms_json", None)
     return payload
 
 
@@ -758,6 +822,64 @@ def classify_public_result(title: str, snippet: str) -> tuple[str, Classificatio
     return GENERAL_FRAUD_LABEL, "fallback", []
 
 
+def state_term_pattern(term: str) -> re.Pattern[str]:
+    separators = r"[\s._/-]+"
+    parts = [re.escape(part) for part in re.findall(r"[A-Za-z]+", term)]
+    return re.compile(rf"(?<![a-z0-9]){separators.join(parts)}(?![a-z0-9])", re.IGNORECASE)
+
+
+def normalize_state_search_text(value: str) -> str:
+    return unquote(value).replace("&nbsp;", " ")
+
+
+def spans_overlap(first: tuple[int, int], second: tuple[int, int]) -> bool:
+    return first[0] < second[1] and second[0] < first[1]
+
+
+def match_reported_states(value: str) -> list[tuple[str, str, str]]:
+    text = normalize_state_search_text(value)
+    raw_matches: list[tuple[str, str, str, tuple[int, int]]] = []
+    for code, label, terms in US_STATE_TERMS:
+        for term in terms:
+            matched = state_term_pattern(term).search(text)
+            if matched:
+                raw_matches.append((code, label, term, matched.span()))
+                break
+
+    dc_spans = [span for code, _, _, span in raw_matches if code == "DC"]
+    matches: list[tuple[str, str, str]] = []
+    seen_codes: set[str] = set()
+    for code, label, term, span in raw_matches:
+        if code == "WA" and any(spans_overlap(span, dc_span) for dc_span in dc_spans):
+            continue
+        if code not in seen_codes:
+            matches.append((code, label, term))
+            seen_codes.add(code)
+    return matches
+
+
+def infer_reported_state(
+    title: str,
+    snippet: str,
+    publisher: str,
+    source_url: str,
+) -> tuple[str, str, FraudStateBasis, list[str]]:
+    fields: list[tuple[FraudStateBasis, str]] = [
+        ("title", title),
+        ("snippet", snippet),
+        ("publisher", publisher),
+        ("source_url", source_url),
+    ]
+    for basis, value in fields:
+        matches = match_reported_states(value)
+        if len(matches) == 1:
+            code, label, term = matches[0]
+            return code, label, basis, [term]
+        if len(matches) > 1:
+            return "", UNKNOWN_FRAUD_STATE_LABEL, "unknown", [term for _, _, term in matches]
+    return "", UNKNOWN_FRAUD_STATE_LABEL, "unknown", []
+
+
 def store_news_results(
     connection: sqlite3.Connection,
     case_id: str,
@@ -772,6 +894,12 @@ def store_news_results(
         classification_label, classification_basis, classification_terms = classify_public_result(
             result.title,
             result.snippet,
+        )
+        fraud_state_code, fraud_state_label, fraud_state_basis, fraud_state_terms = infer_reported_state(
+            result.title,
+            result.snippet,
+            result.publisher,
+            result.source_url,
         )
         connection.execute(
             """
@@ -792,9 +920,13 @@ def store_news_results(
                 classification_label,
                 classification_basis,
                 classification_terms_json,
+                fraud_state_code,
+                fraud_state_label,
+                fraud_state_basis,
+                fraud_state_terms_json,
                 created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(case_id, source_url, keyword) DO UPDATE SET
                 run_id = excluded.run_id,
                 publisher = excluded.publisher,
@@ -807,7 +939,11 @@ def store_news_results(
                 theme = excluded.theme,
                 classification_label = excluded.classification_label,
                 classification_basis = excluded.classification_basis,
-                classification_terms_json = excluded.classification_terms_json
+                classification_terms_json = excluded.classification_terms_json,
+                fraud_state_code = excluded.fraud_state_code,
+                fraud_state_label = excluded.fraud_state_label,
+                fraud_state_basis = excluded.fraud_state_basis,
+                fraud_state_terms_json = excluded.fraud_state_terms_json
             """,
             (
                 result_id,
@@ -825,6 +961,10 @@ def store_news_results(
                 classification_label,
                 classification_basis,
                 json.dumps(classification_terms),
+                fraud_state_code,
+                fraud_state_label,
+                fraud_state_basis,
+                json.dumps(fraud_state_terms),
                 created_at,
             ),
         )
