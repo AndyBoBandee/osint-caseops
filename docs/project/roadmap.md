@@ -46,6 +46,9 @@ Deliverables:
 - Analyst notes.
 - Review filters by status, provider, and evidence state.
 - Result search and sort controls.
+- Source cards with title, publisher, short source location, review status,
+  evidence state, reported category, and reported state.
+- Deterministic reported-category classification for stored public results.
 - Editable evidence notes.
 - Bulk review actions with clear user intent.
 - Duplicate and already-saved indicators.
@@ -61,6 +64,7 @@ Deliverables:
 - Provider request-limit documentation.
 - Safer scheduled-run retry/backoff behavior.
 - Trend grouping by keyword, source, time window, and repeated theme.
+- Trend grouping by reported source category.
 - Source-quality and recency cues for analyst prioritization.
 
 ## Phase 5: Local Export And Audit Bundle

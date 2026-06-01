@@ -238,7 +238,7 @@ Verification:
 
 ## Milestone 9: Source Clarity And Result Classification
 
-Status: Planned.
+Status: Complete.
 
 Deliverables:
 
@@ -260,8 +260,12 @@ Acceptance:
 
 Verification:
 
+- The web fallback dashboard includes the detailed-search provider shape required
+  by the shared frontend type contract.
 - API tests cover taxonomy matching, persistence, dashboard search, trend
-  grouping, and export fields.
-- Rendered QA verifies source cards are readable and source opening remains
-  available.
-- `make test-fast`, `make check`, and `make smoke` pass.
+  grouping, state metadata, duplicate refreshes, and export fields.
+- Rendered Playwright QA verifies fixture-provider dashboard loading, source card
+  readability, reported category/state badges, short source location, source
+  opening, search filtering, selection, and export controls.
+- `make test-fast`, `npm run build`, `npm run test:e2e`, `make check`, and
+  `make smoke` pass.

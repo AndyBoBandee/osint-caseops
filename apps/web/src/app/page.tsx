@@ -12,6 +12,17 @@ const emptyDashboard: FraudMonitorDashboardData = {
   keyword: "fraud",
   case_id: "",
   providers: [],
+  detailed_provider: {
+    name: "brave",
+    status: "missing_config",
+    note: "Set BRAVE_SEARCH_API_KEY before using detailed search.",
+    request_limit: "Brave detailed search requires local API key configuration.",
+    timeout_seconds: 8,
+    last_run_status: "",
+    last_result_count: 0,
+    last_error_message: "",
+    next_retry_at: "",
+  },
   configuration_validation: {
     is_valid: false,
     fixture_mode: false,

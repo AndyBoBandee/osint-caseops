@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "lint": "eslint .",
+    "test:e2e": "node ../../tests/e2e/fraud-monitor-dashboard-smoke.mjs",
     "start": "next start"
   },
   "dependencies": {
@@ -19,6 +20,7 @@
     "@types/react-dom": "^19.0.0",
     "eslint": "^9.0.0",
     "eslint-config-next": "^16.2.6",
+    "playwright": "^1.60.0",
     "postcss": "^8.5.15",
     "typescript": "^5.6.0"
   },
