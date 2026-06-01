@@ -27,6 +27,17 @@ export type ResultSort =
 
 export type ProviderInfo = {
   name: string;
+  provider_id: string;
+  display_name: string;
+  source_type: string;
+  source_confidence: string;
+  enabled: boolean;
+  default_enabled: boolean;
+  requires_api_key: boolean;
+  fixture_mode_available: boolean;
+  fraud_categories: string[];
+  safety_notes: string;
+  tier: string;
   status: ProviderStatus;
   note: string;
   request_limit: string;
@@ -35,6 +46,9 @@ export type ProviderInfo = {
   last_result_count: number;
   last_error_message: string;
   next_retry_at: string;
+  last_run_at: string;
+  last_success_at: string;
+  results_last_24h: number;
 };
 
 export type ConfigurationIssue = {
@@ -121,6 +135,21 @@ export type NewsResultRecord = {
   fraud_state_label: string;
   fraud_state_basis: "title" | "snippet" | "publisher" | "source_url" | "unknown";
   fraud_state_terms: string[];
+  source_type: string;
+  source_confidence: string;
+  fraud_category: string;
+  fraud_subcategory: string;
+  payment_rail: string;
+  victim_segment: string;
+  state: string;
+  city: string;
+  loss_amount: number | null;
+  entities_named: string[];
+  keywords_detected: string[];
+  event_date: string;
+  published_date: string;
+  classification_version: string;
+  classification_confidence: string;
   source_quality: "named_source" | "unnamed_source";
   recency_cue: "fresh" | "recent" | "older" | "unknown";
   prioritization_cue: string;
@@ -213,6 +242,50 @@ export type TrendSummary = {
   groups: TrendGroup[];
 };
 
+export type TrendBucket = {
+  label: string;
+  result_count: number;
+  source_count: number;
+  sample_titles: string[];
+};
+
+export type TrendAlert = {
+  title: string;
+  provider: string;
+  source_type: string;
+  source_confidence: string;
+  fraud_category: string;
+  state: string;
+  published_date: string;
+  source_url: string;
+};
+
+export type ProviderHealthRecord = {
+  provider: string;
+  display_name: string;
+  source_type: string;
+  source_confidence: string;
+  last_run_at: string;
+  last_success_at: string;
+  last_error: string;
+  results_last_24h: number;
+  enabled: boolean;
+  default_enabled: boolean;
+  fixture_mode_available: boolean;
+  requires_api_key: boolean;
+  tier: string;
+};
+
+export type TrendOverview = {
+  generated_at: string;
+  top_categories_this_week: TrendBucket[];
+  official_source_alerts: TrendAlert[];
+  state_activity: TrendBucket[];
+  payment_rail_mentions: TrendBucket[];
+  emerging_keywords: TrendBucket[];
+  provider_health: ProviderHealthRecord[];
+};
+
 export type OperationsDataDirectoryHealth = {
   status: "ok" | "warning" | "error";
   path: string;
@@ -299,4 +372,5 @@ export type FraudMonitorDashboardData = {
   findings: FindingRecord[];
   timeline_events: TimelineEventRecord[];
   operations: OperationsStatus;
+  trend_overview: TrendOverview;
 };

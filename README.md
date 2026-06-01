@@ -9,8 +9,10 @@ This repository is being narrowed back to a focused app foundation. The current 
 - Runs one fixed keyword monitor for `fraud`.
 - Supports manual runs and a local cron-style scheduler while the API process is running.
 - Uses no-key providers by default: GDELT, Google News RSS, and Hacker News Algolia.
+- Supports a trusted source pack for DOJ, CFPB, GDELT DOC, FinCEN, and local FTC Consumer Sentinel imports.
 - Uses Brave News Search only for explicit detailed searches when `BRAVE_SEARCH_API_KEY` is configured.
-- Stores runs, results, review status, trend groups, and evidence links in local SQLite.
+- Stores runs, normalized results, taxonomy tags, review status, trend groups, and evidence links in local SQLite.
+- Includes a native SwiftUI app package under `apps/ios/FraudMonitor`, with macOS as the primary analyst workstation and iOS as a companion surface.
 - Validates provider configuration and separates fixture-only test mode from real provider runs.
 - Exports reviewed local data as Markdown reports or JSON audit bundles.
 - Runs locally by default with FastAPI, Next.js, SQLite, and Docker Compose.
@@ -44,6 +46,8 @@ make test-fast
 make test
 make check
 make smoke
+make mac-build
+make ios-build
 ```
 
 `make dev` runs the API at `http://127.0.0.1:8000` and the web app at `http://127.0.0.1:3000`. `make smoke` runs the Docker Compose stack, verifies API, SQLite, the Fraud Monitor dashboard, and the schedule API without making live provider calls, then shuts the stack down.
@@ -53,6 +57,7 @@ For a first local pilot, follow `docs/operations/pilot-readiness.md`.
 ## Project Layout
 
 - `apps/web/`: Next.js frontend.
+- `apps/ios/FraudMonitor/`: native SwiftUI app package for macOS and iOS.
 - `apps/api/`: FastAPI backend.
 - `docs/`: product, architecture, security, brand, and planning documentation.
 - `data/`: local runtime data. Do not commit real case data or exports.
@@ -74,7 +79,11 @@ Start with:
 
 - `docs/operations/pilot-readiness.md`
 - `docs/operations/local-development.md`
+- `docs/operations/source-provider-setup.md`
+- `docs/operations/analyst-trend-workflow.md`
 - `docs/planning/milestones.md`
+- `docs/product/fraud-taxonomy.md`
+- `docs/product/source-pack-v1.md`
 - `docs/project/brand-book.md`
 - `docs/project/scope.md`
 - `docs/product/mvp.md`

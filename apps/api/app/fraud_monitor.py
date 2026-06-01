@@ -39,6 +39,8 @@ from app.news_monitoring import (
     update_evidence_link,
     update_news_result,
 )
+from app.provider_registry import is_provider_config_ready, provider_metadata
+from app.trends import TrendOverview, build_trend_overview
 
 
 router = APIRouter(prefix="/fraud-monitor", tags=["fraud monitor"])
@@ -94,6 +96,17 @@ def minutes_from_now(minutes: int) -> str:
 
 class ProviderInfo(BaseModel):
     name: str
+    provider_id: str
+    display_name: str
+    source_type: str
+    source_confidence: str
+    enabled: bool
+    default_enabled: bool
+    requires_api_key: bool
+    fixture_mode_available: bool
+    fraud_categories: list[str]
+    safety_notes: str
+    tier: str
     status: ProviderStatus
     note: str
     request_limit: str
@@ -102,6 +115,9 @@ class ProviderInfo(BaseModel):
     last_result_count: int
     last_error_message: str
     next_retry_at: str
+    last_run_at: str
+    last_success_at: str
+    results_last_24h: int
 
 
 class ConfigurationIssue(BaseModel):
@@ -195,6 +211,7 @@ class FraudMonitorDashboard(BaseModel):
     evidence_count: int
     runtime: FraudMonitorRuntime
     trend_summary: TrendSummary
+    trend_overview: TrendOverview
     total_results: int
     pending_results: int
     relevant_results: int
@@ -450,13 +467,8 @@ def configured_providers() -> list[str]:
 
 
 def provider_result_cap(provider: str) -> int:
-    return {
-        "brave": 20,
-        "fixture": 2,
-        "gdelt": 50,
-        "google_news_rss": 50,
-        "hn_algolia": 50,
-    }.get(provider, 0)
+    metadata = provider_metadata(provider)
+    return metadata.request_cap if metadata else 0
 
 
 def provider_request_limit(provider: str) -> str:
@@ -473,39 +485,55 @@ def provider_info(
     case_id: str | None = None,
     next_retry_at: str = "",
 ) -> ProviderInfo:
-    settings = get_settings()
+    metadata = provider_metadata(provider)
+    ready, ready_note = is_provider_config_ready(provider)
+    display_name = metadata.display_name if metadata else provider.replace("_", " ")
+    source_type = metadata.source_type if metadata else "unsupported"
+    source_confidence = metadata.source_confidence if metadata else "unknown"
+    enabled = bool(metadata.enabled) if metadata else False
+    default_enabled = bool(metadata.default_enabled) if metadata else False
+    requires_api_key = bool(metadata.requires_api_key) if metadata else False
+    fixture_mode_available = bool(metadata.fixture_mode_supported) if metadata else False
+    fraud_categories = list(metadata.fraud_categories) if metadata else []
+    safety_notes = metadata.safety_notes if metadata else "Unsupported provider."
+    tier = metadata.tier if metadata else "unsupported"
     base = {
         "name": provider,
+        "provider_id": provider,
+        "display_name": display_name,
+        "source_type": source_type,
+        "source_confidence": source_confidence,
+        "enabled": enabled,
+        "default_enabled": default_enabled,
+        "requires_api_key": requires_api_key,
+        "fixture_mode_available": fixture_mode_available,
+        "fraud_categories": fraud_categories,
+        "safety_notes": safety_notes,
+        "tier": tier,
         "request_limit": provider_request_limit(provider),
-        "timeout_seconds": NEWS_TIMEOUT_SECONDS,
+        "timeout_seconds": metadata.timeout_seconds if metadata else NEWS_TIMEOUT_SECONDS,
         "last_run_status": "",
         "last_result_count": 0,
         "last_error_message": "",
         "next_retry_at": "",
+        "last_run_at": "",
+        "last_success_at": "",
+        "results_last_24h": 0,
     }
-    if provider == "fixture" and not settings.enable_fixture_provider:
+    if metadata is None:
         return ProviderInfo(
             **base,
             status="unsupported",
-            note="Set OSINT_CASEOPS_ENABLE_FIXTURE_PROVIDER=1 before using the fixture provider.",
+            note=ready_note,
         )
-    if provider == "brave" and not settings.brave_search_api_key:
-        return ProviderInfo(
-            **base,
-            status="missing_config",
-            note="Set BRAVE_SEARCH_API_KEY before using Brave News Search.",
-        )
-    if provider not in {"brave", "fixture", "gdelt", "google_news_rss", "hn_algolia"}:
-        return ProviderInfo(
-            **base,
-            status="unsupported",
-            note="Unsupported provider; remove it from OSINT_CASEOPS_FRAUD_MONITOR_PROVIDERS.",
-        )
+    if not ready:
+        status_value: ProviderStatus = "missing_config" if metadata.requires_api_key else "unsupported"
+        return ProviderInfo(**base, status=status_value, note=ready_note)
     if connection is None or case_id is None:
         return ProviderInfo(
             **base,
             status="ready",
-            note="Ready for passive public search.",
+            note=ready_note,
         )
 
     row = connection.execute(
@@ -518,9 +546,31 @@ def provider_info(
         """,
         (case_id, provider),
     ).fetchone()
+    success_row = connection.execute(
+        """
+        SELECT completed_at
+        FROM news_ingestion_runs
+        WHERE case_id = ? AND provider = ? AND status IN ('success', 'partial') AND result_count > 0
+        ORDER BY completed_at DESC, created_at DESC
+        LIMIT 1
+        """,
+        (case_id, provider),
+    ).fetchone()
+    last_24h_row = connection.execute(
+        """
+        SELECT COUNT(news_results.id) AS count
+        FROM news_results
+        JOIN news_ingestion_runs ON news_ingestion_runs.id = news_results.run_id
+        WHERE news_results.case_id = ?
+            AND news_ingestion_runs.provider = ?
+            AND datetime(news_results.retrieved_at) >= datetime('now', '-1 day')
+        """,
+        (case_id, provider),
+    ).fetchone()
+    results_last_24h = int(last_24h_row["count"] if last_24h_row else 0)
     if row is None:
         return ProviderInfo(
-            **base,
+            **{**base, "results_last_24h": results_last_24h},
             status="ready",
             note="Ready for passive public search; no recent run recorded.",
         )
@@ -548,6 +598,9 @@ def provider_info(
             "last_result_count": int(row["result_count"]),
             "last_error_message": error_message,
             "next_retry_at": next_retry_at if status_value in {"timeout", "partial_success"} else "",
+            "last_run_at": row["completed_at"],
+            "last_success_at": success_row["completed_at"] if success_row else "",
+            "results_last_24h": results_last_24h,
         }
     )
 
@@ -1721,6 +1774,7 @@ def build_dashboard(
         operations = build_operations_status(connection, settings, providers)
 
     trend_summary = get_news_trends(case_id)
+    trend_overview = build_trend_overview(case_id=case_id)
     ready_provider_count = len(provider_names_for_run())
 
     return FraudMonitorDashboard(
@@ -1742,6 +1796,7 @@ def build_dashboard(
             last_error_at=last_error_at,
         ),
         trend_summary=trend_summary,
+        trend_overview=trend_overview,
         total_results=counts["total"],
         pending_results=counts["pending"],
         relevant_results=counts["relevant"],

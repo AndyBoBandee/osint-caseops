@@ -1,7 +1,9 @@
 from collections import Counter, defaultdict
 from base64 import b64decode
+import csv
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
+from html import unescape
 from hashlib import sha256
 import json
 from pathlib import Path
@@ -19,6 +21,8 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.cases import connect, get_case_or_404, normalize_long_text, normalize_required_text
 from app.core.config import get_settings
+from app.provider_registry import canonical_provider_id, provider_metadata
+from app.taxonomy import CLASSIFICATION_VERSION, TaxonomyClassification, classify_fraud_taxonomy
 
 
 RunStatus = Literal["success", "partial", "failed"]
@@ -342,6 +346,21 @@ class NewsResultRecord(BaseModel):
     fraud_state_label: str
     fraud_state_basis: FraudStateBasis
     fraud_state_terms: list[str]
+    source_type: str = "news_index"
+    source_confidence: str = "medium"
+    fraud_category: str = "unknown"
+    fraud_subcategory: str = ""
+    payment_rail: str = "unknown"
+    victim_segment: str = "unknown"
+    state: str = ""
+    city: str = ""
+    loss_amount: float | None = None
+    entities_named: list[str] = Field(default_factory=list)
+    keywords_detected: list[str] = Field(default_factory=list)
+    event_date: str = ""
+    published_date: str = ""
+    classification_version: str = CLASSIFICATION_VERSION
+    classification_confidence: str = "low"
     source_quality: SourceQuality
     recency_cue: RecencyCue
     prioritization_cue: str
@@ -457,6 +476,21 @@ class ProviderResult(BaseModel):
     snippet: str = ""
     published_at: str = ""
     retrieved_at: str
+    source_type: str = ""
+    source_confidence: str = ""
+    fraud_category: str = ""
+    fraud_subcategory: str = ""
+    payment_rail: str = ""
+    victim_segment: str = ""
+    state: str = ""
+    city: str = ""
+    loss_amount: float | None = None
+    entities_named: list[str] = Field(default_factory=list)
+    keywords_detected: list[str] = Field(default_factory=list)
+    event_date: str = ""
+    published_date: str = ""
+    classification_version: str = ""
+    classification_confidence: str = ""
 
     @field_validator("source_url")
     @classmethod
@@ -504,11 +538,27 @@ def row_to_news_result(row: sqlite3.Row) -> dict[str, Any]:
     payload["fraud_state_label"] = payload.get("fraud_state_label") or UNKNOWN_FRAUD_STATE_LABEL
     payload["fraud_state_basis"] = payload.get("fraud_state_basis") or "unknown"
     payload["fraud_state_terms"] = decode_json_list(payload.get("fraud_state_terms_json") or "[]")
+    payload["source_type"] = payload.get("source_type") or "news_index"
+    payload["source_confidence"] = payload.get("source_confidence") or "medium"
+    payload["fraud_category"] = payload.get("fraud_category") or "unknown"
+    payload["fraud_subcategory"] = payload.get("fraud_subcategory") or ""
+    payload["payment_rail"] = payload.get("payment_rail") or "unknown"
+    payload["victim_segment"] = payload.get("victim_segment") or "unknown"
+    payload["state"] = payload.get("state") or payload["fraud_state_code"] or ""
+    payload["city"] = payload.get("city") or ""
+    payload["entities_named"] = decode_json_list(payload.get("entities_named_json") or "[]")
+    payload["keywords_detected"] = decode_json_list(payload.get("keywords_detected_json") or "[]")
+    payload["event_date"] = payload.get("event_date") or ""
+    payload["published_date"] = payload.get("published_date") or normalize_date(payload.get("published_at") or "")
+    payload["classification_version"] = payload.get("classification_version") or CLASSIFICATION_VERSION
+    payload["classification_confidence"] = payload.get("classification_confidence") or "low"
     payload["source_quality"] = source_quality(payload)
     payload["recency_cue"] = recency_cue(payload.get("published_at") or payload.get("retrieved_at", ""))
     payload["prioritization_cue"] = prioritization_cue(payload)
     payload.pop("classification_terms_json", None)
     payload.pop("fraud_state_terms_json", None)
+    payload.pop("entities_named_json", None)
+    payload.pop("keywords_detected_json", None)
     return payload
 
 
@@ -872,6 +922,13 @@ def parse_source_datetime(value: str) -> datetime | None:
     return parsed.astimezone(UTC)
 
 
+def normalize_date(value: str) -> str:
+    parsed = parse_source_datetime(value)
+    if parsed is None:
+        return ""
+    return parsed.date().isoformat()
+
+
 def source_quality(row: dict[str, Any]) -> SourceQuality:
     return "named_source" if str(row.get("publisher") or "").strip() else "unnamed_source"
 
@@ -950,6 +1007,21 @@ def build_provider_query(keyword: str, provider: str) -> str:
     return cleaned_keyword
 
 
+def clean_snippet(value: str, limit: int = 500) -> str:
+    text = unescape(re.sub(r"<[^>]+>", " ", value))
+    cleaned = " ".join(text.split())
+    return cleaned[:limit]
+
+
+def epoch_to_iso(value: str) -> str:
+    cleaned = value.strip()
+    if not cleaned:
+        return ""
+    if cleaned.isdigit():
+        return datetime.fromtimestamp(int(cleaned), UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+    return cleaned
+
+
 def search_gdelt(keyword: str, max_results: int) -> list[ProviderResult]:
     query = build_provider_query(keyword, "gdelt")
     params = urlencode(
@@ -988,6 +1060,198 @@ def search_gdelt(keyword: str, max_results: int) -> list[ProviderResult]:
             )
         except ValueError:
             continue
+    return results
+
+
+def search_doj_news(keyword: str, max_results: int) -> list[ProviderResult]:
+    query = build_provider_query(keyword, "doj_news")
+    params = urlencode(
+        {
+            "parameters[title]": query,
+            "fields": "title,url,date,body",
+            "pagesize": max(1, min(max_results, 50)),
+        }
+    )
+    payload = fetch_json(f"https://www.justice.gov/api/v1/press_releases.json?{params}")
+    items = payload.get("results", [])
+    if not isinstance(items, list):
+        return []
+
+    retrieved_at = utc_now()
+    results: list[ProviderResult] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        source_url = str(item.get("url") or "").strip()
+        if source_url.startswith("/"):
+            source_url = f"https://www.justice.gov{source_url}"
+        if not source_url:
+            continue
+        title = unescape(str(item.get("title") or ""))
+        raw_date = str(item.get("date") or "")
+        snippet = clean_snippet(str(item.get("body") or "Official DOJ press release metadata."))
+        try:
+            results.append(
+                ProviderResult(
+                    keyword=keyword,
+                    source_url=source_url,
+                    publisher="U.S. Department of Justice",
+                    title=title,
+                    snippet=snippet,
+                    published_at=epoch_to_iso(raw_date),
+                    retrieved_at=retrieved_at,
+                    source_type="official_enforcement",
+                    source_confidence="high",
+                )
+            )
+        except ValueError:
+            continue
+    return results
+
+
+def search_cfpb_complaints(keyword: str, max_results: int) -> list[ProviderResult]:
+    params = urlencode(
+        {
+            "search_term": build_provider_query(keyword, "cfpb_complaints"),
+            "size": max(1, min(max_results, 50)),
+            "format": "json",
+        }
+    )
+    payload = fetch_json(
+        f"https://www.consumerfinance.gov/data-research/consumer-complaints/search/api/v1/?{params}"
+    )
+    hits = payload.get("hits", {})
+    items = hits.get("hits", []) if isinstance(hits, dict) else payload.get("results", [])
+    if not isinstance(items, list):
+        return []
+
+    retrieved_at = utc_now()
+    results: list[ProviderResult] = []
+    for item in items:
+        source = item.get("_source", item) if isinstance(item, dict) else {}
+        if not isinstance(source, dict):
+            continue
+        complaint_id = str(source.get("complaint_id") or source.get("Complaint ID") or "").strip()
+        product = str(source.get("product") or source.get("Product") or "").strip()
+        issue = str(source.get("issue") or source.get("Issue") or "").strip()
+        state = str(source.get("state") or source.get("State") or "").strip()
+        received = str(source.get("date_received") or source.get("Date received") or "").strip()
+        title = " - ".join(part for part in [product, issue] if part) or "CFPB complaint trend record"
+        if not complaint_id:
+            complaint_id = sha256(f"{title}:{state}:{received}".encode("utf-8")).hexdigest()[:16]
+        try:
+            results.append(
+                ProviderResult(
+                    keyword=keyword,
+                    source_url=f"https://www.consumerfinance.gov/data-research/consumer-complaints/search/detail/{complaint_id}",
+                    publisher="Consumer Financial Protection Bureau",
+                    title=title,
+                    snippet=clean_snippet(
+                        "Public complaint metadata only. Consumer narrative and private details are not stored."
+                    ),
+                    published_at=received,
+                    retrieved_at=retrieved_at,
+                    source_type="official_complaint_data",
+                    source_confidence="high",
+                    state=state,
+                    event_date=normalize_date(received),
+                )
+            )
+        except ValueError:
+            continue
+    return results
+
+
+def search_fincen_advisories(keyword: str, max_results: int) -> list[ProviderResult]:
+    request = Request(
+        "https://www.fincen.gov/resources/suspicious-activity-report-sar-advisory-key-terms",
+        headers={"User-Agent": request_headers()["User-Agent"], "Accept": "text/html,*/*;q=0.8"},
+        method="GET",
+    )
+    try:
+        with urlopen(request, timeout=NEWS_TIMEOUT_SECONDS) as response:
+            body = response.read(MAX_NEWS_BODY_BYTES).decode("utf-8", errors="replace")
+    except HTTPError as exc:
+        raise RuntimeError(f"News provider returned HTTP {exc.code}.") from exc
+    except (URLError, TimeoutError) as exc:
+        raise RuntimeError(f"News provider request failed: {exc}") from exc
+
+    text = " ".join(unescape(re.sub(r"<[^>]+>", " ", body)).split())
+    segments = re.findall(r"(FinCEN (?:Alert|Advisory|Notice)[^.]{0,220}?(?:\d{2}/\d{2}/\d{4}|\d{4}))", text)
+    if not segments:
+        segments = [text[:240]]
+    retrieved_at = utc_now()
+    results: list[ProviderResult] = []
+    for index, segment in enumerate(segments[: max(1, min(max_results, 25))], start=1):
+        if keyword.lower() not in segment.lower() and "fraud" not in segment.lower():
+            continue
+        try:
+            results.append(
+                ProviderResult(
+                    keyword=keyword,
+                    source_url="https://www.fincen.gov/resources/suspicious-activity-report-sar-advisory-key-terms",
+                    publisher="Financial Crimes Enforcement Network",
+                    title=segment[:160],
+                    snippet=clean_snippet(segment),
+                    published_at="",
+                    retrieved_at=retrieved_at,
+                    source_type="official_advisory",
+                    source_confidence="high",
+                    entities_named=[f"fincen-advisory-{index}"],
+                )
+            )
+        except ValueError:
+            continue
+    return results
+
+
+def search_ftc_consumer_sentinel_import(keyword: str, max_results: int) -> list[ProviderResult]:
+    source_path = get_settings().ftc_consumer_sentinel_path
+    if not source_path:
+        raise RuntimeError(
+            "Set OSINT_CASEOPS_FTC_CONSUMER_SENTINEL_PATH to a local Consumer Sentinel CSV export before using this import provider."
+        )
+    path = Path(source_path).expanduser()
+    if not path.exists() or not path.is_file():
+        raise RuntimeError("Configured FTC Consumer Sentinel import path does not exist.")
+
+    retrieved_at = utc_now()
+    results: list[ProviderResult] = []
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        for row in csv.DictReader(handle):
+            if len(results) >= max(1, min(max_results, 100)):
+                break
+            title = str(
+                row.get("Category")
+                or row.get("Report Category")
+                or row.get("Fraud Type")
+                or row.get("category")
+                or "FTC Consumer Sentinel annual record"
+            )
+            state = str(row.get("State") or row.get("state") or "").strip()
+            reports = str(row.get("Reports") or row.get("# of Reports") or row.get("reports") or "").strip()
+            if keyword.lower() not in f"{title} {state}".lower() and "fraud" not in title.lower():
+                continue
+            digest = sha256(json.dumps(row, sort_keys=True).encode("utf-8")).hexdigest()[:16]
+            try:
+                results.append(
+                    ProviderResult(
+                        keyword=keyword,
+                        source_url=f"https://www.ftc.gov/reports/consumer-sentinel-network-data-book#import-{digest}",
+                        publisher="Federal Trade Commission",
+                        title=title,
+                        snippet=clean_snippet(
+                            f"Annual Consumer Sentinel aggregate import. Reports: {reports or 'not provided'}."
+                        ),
+                        published_at=str(row.get("Year") or row.get("year") or ""),
+                        retrieved_at=retrieved_at,
+                        source_type="official_annual_data_import",
+                        source_confidence="high",
+                        state=state,
+                    )
+                )
+            except ValueError:
+                continue
     return results
 
 
@@ -1164,7 +1428,7 @@ def search_public_news_with_provider(
 
     if normalized_provider == "brave":
         return search_brave(keyword, limit)
-    if normalized_provider == "gdelt":
+    if normalized_provider in {"gdelt", "gdelt_doc"}:
         return search_gdelt(keyword, limit)
     if normalized_provider == "google_news_rss":
         return search_google_news_rss(keyword, limit)
@@ -1172,6 +1436,16 @@ def search_public_news_with_provider(
         return search_hn_algolia(keyword, limit)
     if normalized_provider == "fixture":
         return search_fixture_news(keyword, limit)
+    if normalized_provider == "doj_news":
+        return search_doj_news(keyword, limit)
+    if normalized_provider == "cfpb_complaints":
+        return search_cfpb_complaints(keyword, limit)
+    if normalized_provider == "fincen_advisories":
+        return search_fincen_advisories(keyword, limit)
+    if normalized_provider == "ftc_consumer_sentinel_import":
+        return search_ftc_consumer_sentinel_import(keyword, limit)
+    if normalized_provider in {"sec_litigation_releases", "irs_ci_press_releases", "uspis_fraud"}:
+        raise RuntimeError(f"{provider} is a documented Tier 2 provider stub and is disabled until implemented.")
     raise RuntimeError(f"Unsupported news provider: {provider}.")
 
 
@@ -1380,6 +1654,29 @@ def infer_reported_state(
     return "", UNKNOWN_FRAUD_STATE_LABEL, "unknown", []
 
 
+def result_taxonomy(result: ProviderResult) -> TaxonomyClassification:
+    if result.fraud_category:
+        return TaxonomyClassification(
+            fraud_category=result.fraud_category,
+            fraud_subcategory=result.fraud_subcategory,
+            payment_rail=result.payment_rail or "unknown",
+            victim_segment=result.victim_segment or "unknown",
+            keywords_detected=result.keywords_detected,
+            classification_version=result.classification_version or CLASSIFICATION_VERSION,
+            classification_confidence=result.classification_confidence or "medium",
+        )
+    return classify_fraud_taxonomy(result.title, result.snippet, result.publisher, result.source_url)
+
+
+def provider_defaults_for_run(connection: sqlite3.Connection, run_id: str) -> tuple[str, str]:
+    row = connection.execute("SELECT provider FROM news_ingestion_runs WHERE id = ?", (run_id,)).fetchone()
+    provider_id = row["provider"] if row else ""
+    metadata = provider_metadata(canonical_provider_id(provider_id)) or provider_metadata(provider_id)
+    if metadata is None:
+        return "news_index", "medium"
+    return metadata.source_type, metadata.source_confidence
+
+
 def store_news_results(
     connection: sqlite3.Connection,
     case_id: str,
@@ -1387,6 +1684,7 @@ def store_news_results(
     results: list[ProviderResult],
 ) -> list[dict[str, Any]]:
     stored: list[dict[str, Any]] = []
+    default_source_type, default_source_confidence = provider_defaults_for_run(connection, run_id)
     for result in results:
         result_id = str(uuid4())
         created_at = utc_now()
@@ -1401,6 +1699,12 @@ def store_news_results(
             result.publisher,
             result.source_url,
         )
+        taxonomy = result_taxonomy(result)
+        source_type = result.source_type or default_source_type
+        source_confidence = result.source_confidence or default_source_confidence
+        state = result.state or fraud_state_code
+        published_date = result.published_date or normalize_date(result.published_at)
+        event_date = result.event_date or published_date
         connection.execute(
             """
             INSERT INTO news_results (
@@ -1424,9 +1728,24 @@ def store_news_results(
                 fraud_state_label,
                 fraud_state_basis,
                 fraud_state_terms_json,
+                source_type,
+                source_confidence,
+                fraud_category,
+                fraud_subcategory,
+                payment_rail,
+                victim_segment,
+                state,
+                city,
+                loss_amount,
+                entities_named_json,
+                keywords_detected_json,
+                event_date,
+                published_date,
+                classification_version,
+                classification_confidence,
                 created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(case_id, source_url, keyword) DO UPDATE SET
                 run_id = excluded.run_id,
                 publisher = excluded.publisher,
@@ -1443,7 +1762,22 @@ def store_news_results(
                 fraud_state_code = excluded.fraud_state_code,
                 fraud_state_label = excluded.fraud_state_label,
                 fraud_state_basis = excluded.fraud_state_basis,
-                fraud_state_terms_json = excluded.fraud_state_terms_json
+                fraud_state_terms_json = excluded.fraud_state_terms_json,
+                source_type = excluded.source_type,
+                source_confidence = excluded.source_confidence,
+                fraud_category = excluded.fraud_category,
+                fraud_subcategory = excluded.fraud_subcategory,
+                payment_rail = excluded.payment_rail,
+                victim_segment = excluded.victim_segment,
+                state = excluded.state,
+                city = excluded.city,
+                loss_amount = excluded.loss_amount,
+                entities_named_json = excluded.entities_named_json,
+                keywords_detected_json = excluded.keywords_detected_json,
+                event_date = excluded.event_date,
+                published_date = excluded.published_date,
+                classification_version = excluded.classification_version,
+                classification_confidence = excluded.classification_confidence
             """,
             (
                 result_id,
@@ -1465,6 +1799,21 @@ def store_news_results(
                 fraud_state_label,
                 fraud_state_basis,
                 json.dumps(fraud_state_terms),
+                source_type,
+                source_confidence,
+                taxonomy.fraud_category,
+                taxonomy.fraud_subcategory,
+                taxonomy.payment_rail,
+                taxonomy.victim_segment,
+                state,
+                result.city,
+                result.loss_amount,
+                json.dumps(result.entities_named),
+                json.dumps(taxonomy.keywords_detected),
+                event_date,
+                published_date,
+                taxonomy.classification_version,
+                taxonomy.classification_confidence,
                 created_at,
             ),
         )

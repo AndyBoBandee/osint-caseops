@@ -4,7 +4,7 @@ API_DIR := apps/api
 WEB_DIR := apps/web
 DOCKER_DIR := infra/docker
 
-.PHONY: help bootstrap dev api web test-fast test check smoke docker-up docker-down docker-logs
+.PHONY: help bootstrap dev api web ios-build mac-build mac-run test-fast test check smoke docker-up docker-down docker-logs
 
 help:
 	@printf "Fraud Monitor commands\n\n"
@@ -12,6 +12,9 @@ help:
 	@printf "  make dev          Start API reload and Next dev together\n"
 	@printf "  make api          Start only the FastAPI dev server\n"
 	@printf "  make web          Start only the Next.js dev server\n"
+	@printf "  make ios-build    Compile the native SwiftUI Fraud Monitor app package\n"
+	@printf "  make mac-build    Compile the native macOS Fraud Monitor app\n"
+	@printf "  make mac-run      Run the native macOS Fraud Monitor app\n"
 	@printf "  make test-fast    Run API tests and web lint\n"
 	@printf "  make test         Run fast checks plus web build\n"
 	@printf "  make check        Run repo hygiene, tests, build, audit, and Compose config\n"
@@ -32,6 +35,15 @@ api:
 
 web:
 	./scripts/web.sh
+
+ios-build:
+	swift build --package-path apps/ios/FraudMonitor --product FraudMonitorApp
+
+mac-build:
+	swift build --package-path apps/ios/FraudMonitor --product FraudMonitorMac
+
+mac-run:
+	swift run --package-path apps/ios/FraudMonitor FraudMonitorMac
 
 test-fast:
 	cd $(API_DIR) && uv run pytest ../../tests/api

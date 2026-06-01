@@ -17,6 +17,10 @@ __pycache__/
 .venv/
 venv/
 
+# Swift / Xcode
+.build/
+DerivedData/
+
 # Environment and secrets
 .env
 .env.*

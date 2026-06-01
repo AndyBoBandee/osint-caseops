@@ -37,6 +37,19 @@ make smoke
 
 Use `make api` or `make web` to run only one service. Use `make docker-up`, `make docker-down`, and `make docker-logs` for direct Compose control.
 
+Use `make mac-build` to compile the native macOS analyst app and `make mac-run` to launch it against the local API. Use `make ios-build` to compile the iOS companion app. Both live in the SwiftUI package at `apps/ios/FraudMonitor`.
+
+For a deterministic native app run without live provider calls:
+
+```sh
+OSINT_CASEOPS_DATA_DIR=/tmp/osint-caseops-mac-data \
+OSINT_CASEOPS_ENABLE_FIXTURE_PROVIDER=1 \
+OSINT_CASEOPS_FRAUD_MONITOR_PROVIDERS=fixture \
+make api
+```
+
+Then run `make mac-run` in a second terminal. The macOS app defaults to `http://127.0.0.1:8000` and does not start or stop the API process itself.
+
 Docker Compose builds and starts the web service with `next start` so full-stack smoke checks do not rewrite development-only generated files. Use `make dev` or `make web` when you need frontend hot reload.
 
 ## Local Data Paths
@@ -80,6 +93,14 @@ search providers for the fixed keyword `fraud`. Default providers are the no-key
 - `google_news_rss` for Google News RSS search.
 - `hn_algolia` for Hacker News Algolia search.
 
+Source-pack providers are available when explicitly configured:
+
+- `doj_news` for DOJ press-release metadata.
+- `cfpb_complaints` for public CFPB complaint metadata without narratives.
+- `gdelt_doc` as the canonical GDELT DOC provider, with `gdelt` kept as a compatibility alias.
+- `fincen_advisories` for FinCEN advisory/key-term metadata.
+- `ftc_consumer_sentinel_import` for local FTC Consumer Sentinel CSV imports.
+
 Configure the dashboard provider list with:
 
 ```sh
@@ -105,6 +126,10 @@ Provider behavior is deliberately passive and bounded:
 | `hn_algolia` | `GET https://hn.algolia.com/api/v1/search` | No key | Up to `min(OSINT_CASEOPS_NEWS_MAX_RESULTS, 50)` story hits for the fixed keyword | 8 seconds | Public Hacker News search only; comments or stories are not automated claims. |
 | `brave` | `GET https://api.search.brave.com/res/v1/news/search` | `BRAVE_SEARCH_API_KEY` required | Up to `min(OSINT_CASEOPS_NEWS_MAX_RESULTS, 20)` news results for the fixed keyword | 8 seconds | Optional provider; API key must stay local and out of commits. |
 | `fixture` | None | `OSINT_CASEOPS_ENABLE_FIXTURE_PROVIDER=1` required | Up to 2 deterministic local records | Not networked | Test-only public-source-style data for smoke and fixture coverage. |
+| `doj_news` | `GET https://www.justice.gov/api/v1/press_releases.json` | No key | Up to `min(OSINT_CASEOPS_NEWS_MAX_RESULTS, 50)` results | 8 seconds | Official metadata and summaries only; no article-body scraping. |
+| `cfpb_complaints` | `GET https://www.consumerfinance.gov/data-research/consumer-complaints/search/api/v1/` | No key | Up to `min(OSINT_CASEOPS_NEWS_MAX_RESULTS, 50)` records | 8 seconds | Public complaint metadata only; consumer narratives and PII are not stored. |
+| `fincen_advisories` | `GET https://www.fincen.gov/resources/suspicious-activity-report-sar-advisory-key-terms` | No key | Up to `min(OSINT_CASEOPS_NEWS_MAX_RESULTS, 25)` records | 8 seconds | Advisory/key-term metadata only; linked PDFs are not scraped. |
+| `ftc_consumer_sentinel_import` | Local CSV import | `OSINT_CASEOPS_FTC_CONSUMER_SENTINEL_PATH` | Up to `min(OSINT_CASEOPS_NEWS_MAX_RESULTS, 100)` rows | Not networked | Aggregate annual data imports only; no raw narratives. |
 
 The Fraud Monitor uses provider-specific query text before each request. Standard scans use the
 configured no-key providers. Detailed searches use Brave only when requested and receive a

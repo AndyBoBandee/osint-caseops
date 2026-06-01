@@ -235,6 +235,7 @@ export function FraudMonitorDashboard({
     () => dashboard.trend_summary.groups.slice(0, 6),
     [dashboard.trend_summary.groups],
   );
+  const trendOverview = dashboard.trend_overview;
   const resultProviders = useMemo(() => {
     return Array.from(
       new Set([
@@ -649,6 +650,9 @@ export function FraudMonitorDashboard({
           <a className="oc-nav-link" href="#results">
             Results
           </a>
+          <a className="oc-nav-link" href="#trends">
+            Trends
+          </a>
           <a className="oc-nav-link" href="#findings">
             Findings
           </a>
@@ -849,6 +853,70 @@ export function FraudMonitorDashboard({
           </section>
         </div>
 
+        <section className="oc-card fm-results" id="trends">
+          <div className="oc-card-header">
+            <div>
+              <h2 className="oc-card-title">Trends</h2>
+              <p className="oc-card-description">
+                {compactDate(trendOverview.generated_at)}
+              </p>
+            </div>
+            <span className="oc-badge oc-badge-info">source pack v1</span>
+          </div>
+          <div className="fm-trends-grid">
+            <TrendList title="Top fraud categories this week" items={trendOverview.top_categories_this_week} empty="Run a scan to rank categories." />
+            <div className="oc-panel">
+              <div className="oc-card-header oc-card-header-compact">
+                <div>
+                  <h3>High-confidence official-source alerts</h3>
+                </div>
+              </div>
+              <div className="oc-module-list">
+                {trendOverview.official_source_alerts.length === 0 ? (
+                  <p className="oc-empty-state">No high-confidence official-source alerts are stored yet.</p>
+                ) : null}
+                {trendOverview.official_source_alerts.map((alert) => (
+                  <div className="oc-module-row" key={alert.source_url}>
+                    <div>
+                      <strong>{alert.title}</strong>
+                      <p>
+                        {providerLabel(alert.provider)} · {alert.fraud_category.replaceAll("_", " ")}
+                        {alert.state ? ` · ${alert.state}` : ""}
+                      </p>
+                    </div>
+                    <span className="oc-badge oc-badge-success">{alert.source_confidence}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <TrendList title="State activity" items={trendOverview.state_activity} empty="No state-tagged activity yet." />
+            <TrendList title="Payment rail mentions" items={trendOverview.payment_rail_mentions} empty="No payment rail mentions yet." />
+            <TrendList title="Emerging keywords" items={trendOverview.emerging_keywords} empty="No classifier keyword evidence yet." />
+            <div className="oc-panel">
+              <div className="oc-card-header oc-card-header-compact">
+                <div>
+                  <h3>Provider health</h3>
+                </div>
+              </div>
+              <div className="fm-provider-health-table">
+                {trendOverview.provider_health.map((provider) => (
+                  <div className="fm-provider-health-row" key={provider.provider}>
+                    <div>
+                      <strong>{provider.display_name}</strong>
+                      <p>
+                        {provider.source_type.replaceAll("_", " ")} · last run {compactDate(provider.last_run_at)}
+                      </p>
+                    </div>
+                    <span className={provider.enabled ? "oc-badge oc-badge-success" : "oc-badge oc-badge-muted"}>
+                      {provider.results_last_24h} / 24h
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+
         <section className="oc-card fm-results" id="results">
           <div className="oc-card-header">
             <div>
@@ -1010,6 +1078,9 @@ export function FraudMonitorDashboard({
                         {result.source_quality === "named_source" ? "Named source" : "Source review"}
                       </span>
                       <span className="oc-badge oc-badge-info">Reported category: {result.classification_label}</span>
+                      <span className="oc-badge oc-badge-info">{result.fraud_category.replaceAll("_", " ")}</span>
+                      <span className="oc-badge oc-badge-muted">rail {result.payment_rail.replaceAll("_", " ")}</span>
+                      <span className="oc-badge oc-badge-muted">segment {result.victim_segment.replaceAll("_", " ")}</span>
                       <span className={result.fraud_state_code ? "oc-badge oc-badge-info" : "oc-badge oc-badge-muted"}>
                         Reported state: {result.fraud_state_label || "Unknown"}
                       </span>
@@ -1024,6 +1095,8 @@ export function FraudMonitorDashboard({
                 <div className="oc-case-meta">
                   <span>Published {result.published_at || "unknown"}</span>
                   <span>Provider {result.provider ? providerLabel(result.provider) : "unknown"}</span>
+                  <span>Source confidence {result.source_confidence}</span>
+                  <span>Classification {result.classification_confidence}</span>
                   <span>Retrieved {compactDate(result.retrieved_at)}</span>
                   <span>Theme {result.theme || "uncategorized"}</span>
                   <span>Basis {result.classification_basis}</span>
@@ -1455,6 +1528,38 @@ function Metric({ label, value, detail }: { label: string; value: number; detail
   );
 }
 
+function TrendList({
+  title,
+  items,
+  empty,
+}: {
+  title: string;
+  items: { label: string; result_count: number; sample_titles: string[] }[];
+  empty: string;
+}) {
+  return (
+    <div className="oc-panel">
+      <div className="oc-card-header oc-card-header-compact">
+        <div>
+          <h3>{title}</h3>
+        </div>
+      </div>
+      <div className="oc-module-list">
+        {items.length === 0 ? <p className="oc-empty-state">{empty}</p> : null}
+        {items.map((item) => (
+          <div className="oc-module-row" key={item.label}>
+            <div>
+              <strong>{item.label.replaceAll("_", " ")}</strong>
+              {item.sample_titles[0] ? <p>{item.sample_titles[0]}</p> : null}
+            </div>
+            <span className="oc-badge oc-badge-info">{item.result_count}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function Definition({ label, value }: { label: string; value: string }) {
   return (
     <div className="oc-definition-row">
@@ -1468,13 +1573,15 @@ function ProviderRow({ provider }: { provider: ProviderInfo }) {
   return (
     <div className="oc-module-row">
       <div>
-        <strong>{providerLabel(provider.name)}</strong>
+        <strong>{provider.display_name || providerLabel(provider.name)}</strong>
         <p>{provider.note}</p>
         <p>
           {provider.request_limit} Timeout {provider.timeout_seconds}s.
+          {` ${provider.source_type.replaceAll("_", " ")}; confidence ${provider.source_confidence}.`}
           {provider.last_run_status
             ? ` Last run ${provider.last_run_status}, ${provider.last_result_count} result(s).`
             : ""}
+          {provider.results_last_24h ? ` ${provider.results_last_24h} result(s) in the last 24h.` : ""}
           {provider.next_retry_at ? ` Retry after ${compactDate(provider.next_retry_at)}.` : ""}
         </p>
         {provider.last_error_message ? <p>{provider.last_error_message}</p> : null}

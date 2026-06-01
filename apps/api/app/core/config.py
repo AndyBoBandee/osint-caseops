@@ -14,6 +14,7 @@ class Settings:
         self.service_name = "osint-caseops-api"
         self.news_search_provider = getenv("OSINT_CASEOPS_NEWS_PROVIDER", "hn_algolia")
         self.brave_search_api_key = getenv("BRAVE_SEARCH_API_KEY", "")
+        self.ftc_consumer_sentinel_path = getenv("OSINT_CASEOPS_FTC_CONSUMER_SENTINEL_PATH", "")
         self.news_search_max_results = int(getenv("OSINT_CASEOPS_NEWS_MAX_RESULTS", "10"))
         self.enable_fixture_provider = getenv("OSINT_CASEOPS_ENABLE_FIXTURE_PROVIDER", "") == "1"
         providers = getenv("OSINT_CASEOPS_FRAUD_MONITOR_PROVIDERS", "gdelt,google_news_rss,hn_algolia")

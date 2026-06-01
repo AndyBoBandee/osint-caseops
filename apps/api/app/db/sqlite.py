@@ -347,6 +347,31 @@ def initialize_database() -> None:
             "fraud_state_terms_json",
             "TEXT NOT NULL DEFAULT '[]'",
         )
+        ensure_column(connection, "news_results", "source_type", "TEXT NOT NULL DEFAULT 'news_index'")
+        ensure_column(connection, "news_results", "source_confidence", "TEXT NOT NULL DEFAULT 'medium'")
+        ensure_column(connection, "news_results", "fraud_category", "TEXT NOT NULL DEFAULT 'unknown'")
+        ensure_column(connection, "news_results", "fraud_subcategory", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(connection, "news_results", "payment_rail", "TEXT NOT NULL DEFAULT 'unknown'")
+        ensure_column(connection, "news_results", "victim_segment", "TEXT NOT NULL DEFAULT 'unknown'")
+        ensure_column(connection, "news_results", "state", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(connection, "news_results", "city", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(connection, "news_results", "loss_amount", "REAL")
+        ensure_column(connection, "news_results", "entities_named_json", "TEXT NOT NULL DEFAULT '[]'")
+        ensure_column(connection, "news_results", "keywords_detected_json", "TEXT NOT NULL DEFAULT '[]'")
+        ensure_column(connection, "news_results", "event_date", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(connection, "news_results", "published_date", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(
+            connection,
+            "news_results",
+            "classification_version",
+            "TEXT NOT NULL DEFAULT 'fraud-taxonomy-v1'",
+        )
+        ensure_column(
+            connection,
+            "news_results",
+            "classification_confidence",
+            "TEXT NOT NULL DEFAULT 'low'",
+        )
         ensure_column(
             connection,
             "news_ingestion_runs",
