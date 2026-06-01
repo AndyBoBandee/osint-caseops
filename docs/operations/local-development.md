@@ -113,6 +113,11 @@ Provider health uses explicit states in the dashboard:
 - `timeout`: the most recent provider run did not contribute results because it timed out or failed.
 - `partial_success`: the most recent provider run contributed some results and also recorded an issue.
 
+Provider configuration validation is available at `GET /fraud-monitor/configuration/validation` and in
+the dashboard Providers panel. It reports whether at least one provider is ready, whether configured
+providers are unsupported or missing configuration, and whether fixture mode is enabled for test-only
+runs.
+
 Scheduled scans run one job at a time. If a scheduled provider run times out or fails, the dashboard
 records the provider-specific reason and the next scheduled run uses bounded backoff before retrying.
 Manual runs still report the issue immediately and preserve the configured schedule interval.
@@ -137,6 +142,24 @@ skipped and retried on the next scheduler tick without advancing `next_run_at`.
 - New providers must document external requests, rate limits, and responsible-use constraints before implementation.
 - Provider failures should be displayed as concise actionable messages with provider attribution.
 - Public results are leads for analyst review, not automated fraud verdicts.
+
+## Local Exports
+
+Fraud Monitor can export reviewed local data without cloud sync:
+
+- `GET /fraud-monitor/exports/markdown` returns a Markdown report for reviewed results.
+- `GET /fraud-monitor/exports/json` returns a JSON audit bundle for backup and local review.
+
+Both formats include:
+
+- Generated timestamp, scope, passive methodology, provider configuration, and local-only metadata.
+- Reviewed fraud monitor results only; pending results remain in the dashboard queue but are not exported.
+- Evidence table rows with source URL, provider, review status, analyst note, retrieval timestamp, publication timestamp, and title.
+- Trend groups with confidence-aware wording and analyst-review language.
+- Responsible-use limitations that warn against unsupported allegations and remind the user to redact before sharing.
+
+Exports are generated from the local SQLite database and returned to the user. The app does not upload
+or synchronize export content.
 
 ## First Setup Tasks
 

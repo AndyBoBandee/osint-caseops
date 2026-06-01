@@ -19,6 +19,7 @@ The primary user is an analyst, researcher, or technically comfortable operator 
 5. User reviews results and marks relevance.
 6. User saves useful source links as evidence.
 7. User reviews trend groups and job history.
+8. User exports reviewed local data as Markdown or JSON.
 
 ## Required MVP Surface
 
@@ -30,8 +31,10 @@ The primary user is an analyst, researcher, or technically comfortable operator 
 - Evidence-link action.
 - Job history.
 - Trend groups.
+- Provider configuration validation.
+- Local Markdown and JSON exports.
 - Responsible-use documentation.
 
 ## Acceptance Criteria
 
-The MVP is complete when a user can run the app locally, perform a fraud monitor scan, inspect provider/job status, review stored public results, save an evidence link, and verify all data remains local.
+The MVP is complete when a user can run the app locally, perform a fraud monitor scan, inspect provider/job status, review stored public results, save an evidence link, export reviewed local data, and verify all data remains local.

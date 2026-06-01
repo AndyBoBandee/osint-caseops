@@ -9,6 +9,7 @@ from typing import Any, Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Query, status
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
 from app.cases import connect
@@ -45,6 +46,7 @@ DEFAULT_INTERVAL_MINUTES = 60
 TriggerType = Literal["manual", "scheduled"]
 ProviderStatus = Literal["ready", "missing_config", "unsupported", "timeout", "partial_success"]
 EvidenceFilter = Literal["all", "saved", "unsaved"]
+ValidationSeverity = Literal["error", "warning", "info"]
 ResultSort = Literal[
     "retrieved_desc",
     "retrieved_asc",
@@ -84,6 +86,21 @@ class ProviderInfo(BaseModel):
     last_result_count: int
     last_error_message: str
     next_retry_at: str
+
+
+class ConfigurationIssue(BaseModel):
+    severity: ValidationSeverity
+    provider: str
+    message: str
+
+
+class FraudMonitorConfigurationValidation(BaseModel):
+    is_valid: bool
+    fixture_mode: bool
+    provider_count: int
+    ready_provider_count: int
+    issues: list[ConfigurationIssue]
+    recommendations: list[str]
 
 
 class FraudMonitorSchedule(BaseModel):
@@ -138,6 +155,7 @@ class FraudMonitorDashboard(BaseModel):
     keyword: str
     case_id: str
     providers: list[ProviderInfo]
+    configuration_validation: FraudMonitorConfigurationValidation
     schedule: FraudMonitorSchedule
     latest_job: FraudMonitorJob | None
     jobs: list[FraudMonitorJob]
@@ -160,6 +178,35 @@ class FraudMonitorBulkReviewUpdate(BaseModel):
 class FraudMonitorBulkReviewResult(BaseModel):
     updated_count: int
     results: list[NewsResultRecord]
+
+
+class FraudMonitorExportMetadata(BaseModel):
+    generated_at: str
+    scope: str
+    methodology: str
+    provider_configuration: list[ProviderInfo]
+    reviewed_result_count: int
+    evidence_count: int
+    local_only: bool
+    responsible_use: str
+
+
+class FraudMonitorEvidenceTableRow(BaseModel):
+    source_url: str
+    provider: str
+    review_status: ReviewStatus
+    analyst_note: str
+    retrieved_at: str
+    published_at: str
+    title: str
+
+
+class FraudMonitorExportBundle(BaseModel):
+    metadata: FraudMonitorExportMetadata
+    trend_summary: TrendSummary
+    evidence_table: list[FraudMonitorEvidenceTableRow]
+    reviewed_results: list[NewsResultRecord]
+    limitations: list[str]
 
 
 def configured_providers() -> list[str]:
@@ -280,6 +327,67 @@ def provider_info(
 
 def provider_names_for_run() -> list[str]:
     return [info.name for info in map(provider_info, configured_providers()) if info.status == "ready"]
+
+
+def validate_configuration(providers: list[ProviderInfo] | None = None) -> FraudMonitorConfigurationValidation:
+    settings = get_settings()
+    provider_details = providers or [provider_info(provider) for provider in configured_providers()]
+    issues: list[ConfigurationIssue] = []
+    recommendations = [
+        "Use fixture provider only for deterministic tests and smoke checks.",
+        "Use no-key public providers for local pilot runs unless an optional key is configured.",
+        "Keep API keys and exported reports out of Git.",
+    ]
+    if not provider_details:
+        issues.append(
+            ConfigurationIssue(
+                severity="error",
+                provider="all",
+                message="No fraud monitor providers are configured.",
+            )
+        )
+    for provider in provider_details:
+        if provider.status == "missing_config":
+            issues.append(
+                ConfigurationIssue(
+                    severity="error",
+                    provider=provider.name,
+                    message=provider.note,
+                )
+            )
+        elif provider.status == "unsupported":
+            issues.append(
+                ConfigurationIssue(
+                    severity="error",
+                    provider=provider.name,
+                    message=provider.note,
+                )
+            )
+        if provider.name == "fixture" and provider.status == "ready":
+            issues.append(
+                ConfigurationIssue(
+                    severity="warning",
+                    provider=provider.name,
+                    message="Fixture provider is test-only; do not use fixture exports as real public-source findings.",
+                )
+            )
+    ready_count = sum(1 for provider in provider_details if provider.status == "ready")
+    if ready_count == 0:
+        issues.append(
+            ConfigurationIssue(
+                severity="error",
+                provider="all",
+                message="At least one ready provider is required before running the monitor.",
+            )
+        )
+    return FraudMonitorConfigurationValidation(
+        is_valid=not any(issue.severity == "error" for issue in issues),
+        fixture_mode=settings.enable_fixture_provider,
+        provider_count=len(provider_details),
+        ready_provider_count=ready_count,
+        issues=issues,
+        recommendations=recommendations,
+    )
 
 
 def ensure_monitor_case(connection: sqlite3.Connection) -> str:
@@ -794,6 +902,7 @@ def build_dashboard(
             provider_info(provider, connection, case_id, settings["next_run_at"])
             for provider in configured_providers()
         ]
+        configuration_validation = validate_configuration(providers)
 
     trend_summary = get_news_trends(case_id)
     ready_provider_count = len(provider_names_for_run())
@@ -802,6 +911,7 @@ def build_dashboard(
         keyword=FRAUD_KEYWORD,
         case_id=case_id,
         providers=providers,
+        configuration_validation=configuration_validation,
         schedule=row_to_schedule(settings),
         latest_job=jobs[0] if jobs else None,
         jobs=jobs,
@@ -820,6 +930,178 @@ def build_dashboard(
         relevant_results=counts["relevant"],
         not_relevant_results=counts["not_relevant"],
     )
+
+
+def list_reviewed_results(connection: sqlite3.Connection, case_id: str) -> list[dict[str, Any]]:
+    rows = connection.execute(
+        """
+        SELECT news_results.*,
+            news_ingestion_runs.provider AS provider,
+            COALESCE(evidence_links.analyst_note, '') AS evidence_analyst_note
+        FROM news_results
+        JOIN news_ingestion_runs ON news_ingestion_runs.id = news_results.run_id
+        LEFT JOIN evidence_links ON evidence_links.id = news_results.evidence_link_id
+        WHERE news_results.case_id = ?
+            AND news_results.review_status != 'pending'
+        ORDER BY news_results.review_status ASC,
+            news_results.retrieved_at DESC,
+            news_results.created_at DESC
+        """,
+        (case_id,),
+    ).fetchall()
+    return [row_to_news_result(row) for row in rows]
+
+
+def export_limitations() -> list[str]:
+    return [
+        "Public results are leads for analyst review, not automated fraud conclusions.",
+        "The bundle contains local data only and does not synchronize to a cloud service.",
+        "Source links should be reopened before external sharing because public pages can change.",
+        "Redact sensitive details before sending exports outside the local investigation context.",
+    ]
+
+
+def build_export_bundle() -> FraudMonitorExportBundle:
+    generated_at = utc_now()
+    with connect() as connection:
+        settings = ensure_monitor_settings(connection)
+        case_id = settings["case_id"]
+        reviewed_results = list_reviewed_results(connection, case_id)
+        evidence_rows = [
+            FraudMonitorEvidenceTableRow(
+                source_url=result["source_url"],
+                provider=result["provider"],
+                review_status=result["review_status"],
+                analyst_note=result["evidence_analyst_note"],
+                retrieved_at=result["retrieved_at"],
+                published_at=result["published_at"],
+                title=result["title"] or result["source_url"],
+            )
+            for result in reviewed_results
+        ]
+        providers = [
+            provider_info(provider, connection, case_id, settings["next_run_at"])
+            for provider in configured_providers()
+        ]
+        evidence_total = evidence_count(connection, case_id)
+
+    trend_summary = get_news_trends(case_id)
+    return FraudMonitorExportBundle(
+        metadata=FraudMonitorExportMetadata(
+            generated_at=generated_at,
+            scope="Fixed-keyword passive public-source fraud monitoring.",
+            methodology=(
+                "Passive HTTP GET requests to configured public search providers, local review "
+                "status decisions, and saved public source links with analyst notes."
+            ),
+            provider_configuration=providers,
+            reviewed_result_count=len(reviewed_results),
+            evidence_count=evidence_total,
+            local_only=True,
+            responsible_use=(
+                "Exports preserve source context and confidence-aware language. They must not be "
+                "treated as unsupported allegations or shared without redaction review."
+            ),
+        ),
+        trend_summary=trend_summary,
+        evidence_table=evidence_rows,
+        reviewed_results=reviewed_results,
+        limitations=export_limitations(),
+    )
+
+
+def markdown_cell(value: str | int) -> str:
+    return " ".join(str(value).split()).replace("\\", "\\\\").replace("|", "\\|")
+
+
+def markdown_table(headers: list[str], rows: list[list[str | int]]) -> list[str]:
+    output = [
+        "| " + " | ".join(markdown_cell(header) for header in headers) + " |",
+        "| " + " | ".join("---" for _ in headers) + " |",
+    ]
+    output.extend("| " + " | ".join(markdown_cell(cell) for cell in row) + " |" for row in rows)
+    return output
+
+
+def export_bundle_to_markdown(bundle: FraudMonitorExportBundle) -> str:
+    lines = [
+        "# Fraud Monitor Export",
+        "",
+        "## Export Metadata",
+        "",
+        f"- Generated at: {bundle.metadata.generated_at}",
+        f"- Scope: {bundle.metadata.scope}",
+        f"- Methodology: {bundle.metadata.methodology}",
+        f"- Reviewed results: {bundle.metadata.reviewed_result_count}",
+        f"- Evidence links: {bundle.metadata.evidence_count}",
+        f"- Local only: {'yes' if bundle.metadata.local_only else 'no'}",
+        f"- Responsible use: {bundle.metadata.responsible_use}",
+        "",
+        "## Provider Configuration",
+        "",
+        *markdown_table(
+            ["Provider", "Status", "Request limit", "Timeout", "Last run", "Last issue"],
+            [
+                [
+                    provider.name,
+                    provider.status,
+                    provider.request_limit,
+                    f"{provider.timeout_seconds}s",
+                    provider.last_run_status or "not run",
+                    provider.last_error_message,
+                ]
+                for provider in bundle.metadata.provider_configuration
+            ],
+        ),
+        "",
+        "## Trend Summary",
+        "",
+    ]
+
+    if bundle.trend_summary.groups:
+        lines.extend(
+            markdown_table(
+                ["Group", "Count", "Priority cue", "Confidence wording"],
+                [
+                    [
+                        f"{group.group_type}: {group.label}",
+                        group.result_count,
+                        group.priority_cue,
+                        group.confidence_language,
+                    ]
+                    for group in bundle.trend_summary.groups
+                ],
+            )
+        )
+    else:
+        lines.append("No trend groups are available yet.")
+
+    lines.extend(["", "## Evidence Table", ""])
+    if bundle.evidence_table:
+        lines.extend(
+            markdown_table(
+                ["Title", "Source URL", "Provider", "Review", "Analyst note", "Retrieved", "Published"],
+                [
+                    [
+                        row.title,
+                        row.source_url,
+                        row.provider,
+                        row.review_status,
+                        row.analyst_note,
+                        row.retrieved_at,
+                        row.published_at,
+                    ]
+                    for row in bundle.evidence_table
+                ],
+            )
+        )
+    else:
+        lines.append("No reviewed fraud monitor results are available yet.")
+
+    lines.extend(["", "## Limitations", ""])
+    lines.extend(f"- {limitation}" for limitation in bundle.limitations)
+    lines.append("")
+    return "\n".join(lines)
 
 
 @router.get("/dashboard", response_model=FraudMonitorDashboard)
@@ -841,6 +1123,25 @@ def get_dashboard(
         limit=limit,
         offset=offset,
     )
+
+
+@router.get("/exports/json", response_model=FraudMonitorExportBundle)
+def export_json_bundle() -> FraudMonitorExportBundle:
+    return build_export_bundle()
+
+
+@router.get("/exports/markdown", response_class=PlainTextResponse)
+def export_markdown_report() -> PlainTextResponse:
+    return PlainTextResponse(
+        export_bundle_to_markdown(build_export_bundle()),
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="fraud-monitor-export.md"'},
+    )
+
+
+@router.get("/configuration/validation", response_model=FraudMonitorConfigurationValidation)
+def get_configuration_validation() -> FraudMonitorConfigurationValidation:
+    return validate_configuration()
 
 
 @router.post("/jobs", response_model=FraudMonitorJob)

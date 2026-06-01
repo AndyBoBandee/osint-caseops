@@ -15,7 +15,7 @@ Use:
 - Rounded 2xl cards
 - Subtle borders
 - Strong spacing
-- Graph/timeline/report views that feel like investigation software
+- Fraud Monitor dashboard views that make providers, review state, evidence, and exports easy to scan
 
 Avoid:
 
@@ -26,7 +26,23 @@ Avoid:
 - Aggressive terms like target, hunt, exploit, weaponize
 - Unsupported “malicious” claims without confidence and evidence
 
-## App Shell Requirements
+## Current App Shell Requirements
+
+The current product surface is the Fraud Monitor dashboard:
+
+1. Left sidebar navigation
+2. Sticky topbar
+3. Dashboard cards
+4. Provider configuration and validation panel
+5. Review queue
+6. Evidence-link controls
+7. Trend groups
+8. Markdown and JSON export controls
+
+The broader workspace layout below is legacy visual reference unless those features are explicitly
+reintroduced into the Fraud Monitor roadmap.
+
+## Legacy Workspace Reference
 
 The main layout should include:
 

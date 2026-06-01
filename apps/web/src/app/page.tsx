@@ -12,6 +12,14 @@ const emptyDashboard: FraudMonitorDashboardData = {
   keyword: "fraud",
   case_id: "",
   providers: [],
+  configuration_validation: {
+    is_valid: false,
+    fixture_mode: false,
+    provider_count: 0,
+    ready_provider_count: 0,
+    issues: [],
+    recommendations: [],
+  },
   schedule: {
     enabled: false,
     interval_minutes: 60,

@@ -55,6 +55,9 @@ def test_dashboard_bootstraps_single_fraud_monitor_case(tmp_path: Path, monkeypa
     assert dashboard["providers"][0]["request_limit"] == "Up to 10 result(s) per keyword per run."
     assert dashboard["providers"][0]["timeout_seconds"] == 8
     assert dashboard["providers"][0]["last_run_status"] == ""
+    assert dashboard["configuration_validation"]["is_valid"] is True
+    assert dashboard["configuration_validation"]["ready_provider_count"] == 2
+    assert dashboard["configuration_validation"]["issues"] == []
 
 
 def test_manual_fraud_job_runs_configured_providers_and_stores_results(
@@ -151,6 +154,44 @@ def test_provider_health_distinguishes_missing_config_unsupported_and_partial_su
         "unknown": "unsupported",
         "hn_algolia": "partial_success",
     }
+
+
+def test_configuration_validation_flags_provider_errors_and_fixture_mode(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    with make_client(tmp_path, monkeypatch, providers="brave,unknown,fixture") as client:
+        invalid_response = client.get("/fraud-monitor/configuration/validation")
+
+    assert invalid_response.status_code == 200
+    invalid = invalid_response.json()
+    assert invalid["is_valid"] is False
+    assert invalid["fixture_mode"] is False
+    assert invalid["ready_provider_count"] == 0
+    assert {issue["provider"] for issue in invalid["issues"] if issue["severity"] == "error"} == {
+        "all",
+        "brave",
+        "fixture",
+        "unknown",
+    }
+
+    with make_client(
+        tmp_path / "fixture-validation",
+        monkeypatch,
+        providers="fixture",
+        fixture_enabled=True,
+    ) as client:
+        fixture_response = client.get("/fraud-monitor/configuration/validation")
+        dashboard = client.get("/fraud-monitor/dashboard").json()
+
+    assert fixture_response.status_code == 200
+    fixture = fixture_response.json()
+    assert fixture["is_valid"] is True
+    assert fixture["fixture_mode"] is True
+    assert fixture["ready_provider_count"] == 1
+    assert fixture["issues"][0]["severity"] == "warning"
+    assert "test-only" in fixture["issues"][0]["message"]
+    assert dashboard["configuration_validation"]["fixture_mode"] is True
 
 
 def test_scheduled_provider_timeout_uses_bounded_backoff(
@@ -305,6 +346,76 @@ def test_fixture_provider_is_gated_and_deterministic(tmp_path: Path, monkeypatch
     assert run_response.json()["result_count"] == 2
     assert dashboard["providers"][0]["status"] == "ready"
     assert {result["provider"] for result in dashboard["results"]} == {"fixture"}
+
+
+def test_exports_handle_empty_reviewed_state(tmp_path: Path, monkeypatch) -> None:
+    with make_client(tmp_path, monkeypatch, providers="fixture", fixture_enabled=True) as client:
+        json_response = client.get("/fraud-monitor/exports/json")
+        markdown_response = client.get("/fraud-monitor/exports/markdown")
+
+    assert json_response.status_code == 200
+    bundle = json_response.json()
+    assert bundle["metadata"]["local_only"] is True
+    assert bundle["metadata"]["reviewed_result_count"] == 0
+    assert bundle["evidence_table"] == []
+    assert bundle["reviewed_results"] == []
+    assert "unsupported allegations" in bundle["metadata"]["responsible_use"]
+    assert markdown_response.status_code == 200
+    assert "No reviewed fraud monitor results are available yet." in markdown_response.text
+
+
+def test_exports_include_reviewed_results_metadata_trends_and_escaped_markdown(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    def fake_search(keyword: str, provider: str) -> list[ProviderResult]:
+        return [
+            ProviderResult(
+                keyword=keyword,
+                source_url="https://gdelt.example/fraud-report",
+                publisher="GDELT | Example",
+                title="Agency | fraud\nwarning",
+                snippet="Public reporting describes a fraud pattern for analyst review.",
+                published_at="2026-05-30T12:00:00Z",
+                retrieved_at="2026-05-30T12:05:00Z",
+            )
+        ]
+
+    monkeypatch.setattr(fraud_monitor, "search_public_news_with_provider", fake_search)
+
+    with make_client(tmp_path, monkeypatch, providers="gdelt") as client:
+        client.post("/fraud-monitor/jobs")
+        dashboard = client.get("/fraud-monitor/dashboard").json()
+        result_id = dashboard["results"][0]["id"]
+        client.patch(
+            f"/fraud-monitor/results/{result_id}",
+            json={"review_status": "relevant"},
+        )
+        client.post(
+            f"/fraud-monitor/results/{result_id}/evidence-links",
+            json={"analyst_note": "Analyst | note\nwith newline."},
+        )
+
+        json_response = client.get("/fraud-monitor/exports/json")
+        markdown_response = client.get("/fraud-monitor/exports/markdown")
+
+    assert json_response.status_code == 200
+    bundle = json_response.json()
+    assert bundle["metadata"]["scope"] == "Fixed-keyword passive public-source fraud monitoring."
+    assert bundle["metadata"]["reviewed_result_count"] == 1
+    assert bundle["metadata"]["provider_configuration"][0]["name"] == "gdelt"
+    assert bundle["evidence_table"][0]["source_url"] == "https://gdelt.example/fraud-report"
+    assert bundle["evidence_table"][0]["provider"] == "gdelt"
+    assert bundle["evidence_table"][0]["review_status"] == "relevant"
+    assert bundle["evidence_table"][0]["analyst_note"] == "Analyst | note\nwith newline."
+    assert bundle["reviewed_results"][0]["title"] == "Agency | fraud\nwarning"
+    assert any("analyst review required" in group["confidence_language"] for group in bundle["trend_summary"]["groups"])
+
+    assert markdown_response.status_code == 200
+    assert markdown_response.headers["content-disposition"] == 'attachment; filename="fraud-monitor-export.md"'
+    assert "Agency \\| fraud warning" in markdown_response.text
+    assert "Analyst \\| note with newline." in markdown_response.text
+    assert "Public results are leads for analyst review" in markdown_response.text
 
 
 def test_review_operations_search_pagination_bulk_notes_and_duplicates(

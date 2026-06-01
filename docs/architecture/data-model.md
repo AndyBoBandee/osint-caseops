@@ -1,5 +1,9 @@
 # Data Model
 
+The active product path is Fraud Monitor. News runs, news results, evidence links, monitor settings,
+jobs, provider validation, and local exports are the current data surface. The broader case/entity/
+finding/relationship/timeline model is legacy reference direction unless explicitly reintroduced.
+
 ## Case
 
 Represents a scoped investigation.

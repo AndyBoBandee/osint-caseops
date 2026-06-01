@@ -13,11 +13,14 @@ WEB_FILE="$(mktemp)"
 WEB_AFTER_FILE="$(mktemp)"
 DASHBOARD_FILE="$(mktemp)"
 SCHEDULE_FILE="$(mktemp)"
+CONFIG_FILE="$(mktemp)"
 JOB_FILE="$(mktemp)"
 REVIEW_FILE="$(mktemp)"
 EVIDENCE_FILE="$(mktemp)"
 BULK_REVIEW_FILE="$(mktemp)"
 NOTE_FILE="$(mktemp)"
+JSON_EXPORT_FILE="$(mktemp)"
+MARKDOWN_EXPORT_FILE="$(mktemp)"
 SEARCH_FILE="$(mktemp)"
 PAGED_FILE="$(mktemp)"
 CLEANED_UP=0
@@ -37,11 +40,14 @@ cleanup() {
 	    "${WEB_AFTER_FILE}" \
 	    "${DASHBOARD_FILE}" \
 	    "${SCHEDULE_FILE}" \
+	    "${CONFIG_FILE}" \
 	    "${JOB_FILE}" \
 	    "${REVIEW_FILE}" \
 	    "${EVIDENCE_FILE}" \
 	    "${BULK_REVIEW_FILE}" \
 	    "${NOTE_FILE}" \
+	    "${JSON_EXPORT_FILE}" \
+	    "${MARKDOWN_EXPORT_FILE}" \
 	    "${SEARCH_FILE}" \
 	    "${PAGED_FILE}"
 	  rm -rf "${SMOKE_DATA_DIR}"
@@ -91,6 +97,13 @@ grep -q '"interval_minutes":60' "${DASHBOARD_FILE}"
 grep -q '"name":"fixture"' "${DASHBOARD_FILE}"
 grep -q '"status":"ready"' "${DASHBOARD_FILE}"
 grep -q '"ready_provider_count":1' "${DASHBOARD_FILE}"
+grep -q '"configuration_validation"' "${DASHBOARD_FILE}"
+
+curl -fsS "${WEB_URL}/api/backend/fraud-monitor/configuration/validation" >"${CONFIG_FILE}"
+grep -q '"is_valid":true' "${CONFIG_FILE}"
+grep -q '"fixture_mode":true' "${CONFIG_FILE}"
+grep -q '"provider":"fixture"' "${CONFIG_FILE}"
+grep -q 'test-only' "${CONFIG_FILE}"
 
 curl -fsS -X PATCH "${WEB_URL}/api/backend/fraud-monitor/schedule" \
   -H "content-type: application/json" \
@@ -180,16 +193,32 @@ grep -q '"relevant_results":1' "${DASHBOARD_FILE}"
 grep -q '"saved_as_evidence":true' "${DASHBOARD_FILE}"
 grep -q '"evidence_analyst_note":"Updated during deterministic smoke check."' "${DASHBOARD_FILE}"
 
+curl -fsS "${WEB_URL}/api/backend/fraud-monitor/exports/json" >"${JSON_EXPORT_FILE}"
+grep -q '"local_only":true' "${JSON_EXPORT_FILE}"
+grep -q '"reviewed_result_count":2' "${JSON_EXPORT_FILE}"
+grep -q '"source_url":"https://fixture.example' "${JSON_EXPORT_FILE}"
+grep -q '"provider":"fixture"' "${JSON_EXPORT_FILE}"
+grep -q '"analyst_note":"Updated during deterministic smoke check."' "${JSON_EXPORT_FILE}"
+
+curl -fsS "${WEB_URL}/api/backend/fraud-monitor/exports/markdown" >"${MARKDOWN_EXPORT_FILE}"
+grep -q '# Fraud Monitor Export' "${MARKDOWN_EXPORT_FILE}"
+grep -q 'Updated during deterministic smoke check.' "${MARKDOWN_EXPORT_FILE}"
+grep -q 'analyst review required' "${MARKDOWN_EXPORT_FILE}"
+grep -q 'Public results are leads for analyst review' "${MARKDOWN_EXPORT_FILE}"
+
 curl -fsS "${WEB_URL}" >"${WEB_AFTER_FILE}"
 grep -q 'Review queue' "${WEB_AFTER_FILE}"
+grep -q 'Export Markdown' "${WEB_AFTER_FILE}"
+grep -q 'Export JSON' "${WEB_AFTER_FILE}"
 grep -q 'Search' "${WEB_AFTER_FILE}"
 grep -q 'Sort' "${WEB_AFTER_FILE}"
 grep -q 'Select page' "${WEB_AFTER_FILE}"
 grep -q 'Provider' "${WEB_AFTER_FILE}"
 grep -q 'Evidence' "${WEB_AFTER_FILE}"
 grep -q 'Fixture' "${WEB_AFTER_FILE}"
+grep -q 'Config ok' "${WEB_AFTER_FILE}"
 
 echo "API health: $(cat "${API_HEALTH_FILE}")"
 echo "DB health: $(cat "${DB_HEALTH_FILE}")"
 echo "Web dashboard: Fraud Monitor rendered"
-echo "Fraud monitor smoke: fixture run, search, pagination, bulk review, evidence note edit, filters, and schedule verified without live provider calls"
+echo "Fraud monitor smoke: fixture run, search, pagination, bulk review, evidence note edit, exports, filters, and schedule verified without live provider calls"

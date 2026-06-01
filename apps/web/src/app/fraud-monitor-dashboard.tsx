@@ -53,6 +53,16 @@ function statusClass(status: string) {
   return "oc-badge oc-badge-danger";
 }
 
+function issueClass(severity: string) {
+  if (severity === "error") {
+    return "oc-badge oc-badge-danger";
+  }
+  if (severity === "warning") {
+    return "oc-badge oc-badge-medium";
+  }
+  return "oc-badge oc-badge-info";
+}
+
 function compactDate(value: string) {
   if (!value) {
     return "Never";
@@ -146,6 +156,7 @@ export function FraudMonitorDashboard({
   const [isRunning, setIsRunning] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSavingSchedule, setIsSavingSchedule] = useState(false);
+  const [exportingFormat, setExportingFormat] = useState<"markdown" | "json" | null>(null);
   const [apiOnline, setApiOnline] = useState(initialApiOnline);
   const [reviewFilter, setReviewFilter] = useState<ReviewFilter>(initialDashboard.result_page.review_filter);
   const [providerFilter, setProviderFilter] = useState(initialDashboard.result_page.provider_filter);
@@ -235,6 +246,34 @@ export function FraudMonitorDashboard({
       setError(getRequestError(caught, "Could not run fraud scan."));
     } finally {
       setIsRunning(false);
+    }
+  }
+
+  async function downloadExport(format: "markdown" | "json") {
+    setExportingFormat(format);
+    setNotice("");
+    setError("");
+    try {
+      const response = await fetch(`/api/backend/fraud-monitor/exports/${format}`, {
+        cache: "no-store",
+      });
+      if (!response.ok) {
+        throw new Error(`${response.status} ${response.statusText}`);
+      }
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = format === "markdown" ? "fraud-monitor-export.md" : "fraud-monitor-audit-bundle.json";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      setNotice(format === "markdown" ? "Markdown export downloaded." : "JSON audit bundle downloaded.");
+    } catch (caught) {
+      setError(getRequestError(caught, "Could not download export."));
+    } finally {
+      setExportingFormat(null);
     }
   }
 
@@ -435,6 +474,22 @@ export function FraudMonitorDashboard({
             <button className="oc-btn" disabled={isRefreshing} onClick={() => void handleRefresh()} type="button">
               {isRefreshing ? "Refreshing" : "Refresh"}
             </button>
+            <button
+              className="oc-btn"
+              disabled={exportingFormat !== null}
+              onClick={() => void downloadExport("markdown")}
+              type="button"
+            >
+              {exportingFormat === "markdown" ? "Exporting" : "Export Markdown"}
+            </button>
+            <button
+              className="oc-btn"
+              disabled={exportingFormat !== null}
+              onClick={() => void downloadExport("json")}
+              type="button"
+            >
+              {exportingFormat === "json" ? "Exporting" : "Export JSON"}
+            </button>
           </div>
         </header>
 
@@ -519,11 +574,26 @@ export function FraudMonitorDashboard({
                 <h2 className="oc-card-title">Providers</h2>
                 <p className="oc-card-description">No-key providers run by default.</p>
               </div>
+              <span className={dashboard.configuration_validation.is_valid ? "oc-badge oc-badge-success" : "oc-badge oc-badge-danger"}>
+                {dashboard.configuration_validation.is_valid ? "Config ok" : "Config attention"}
+              </span>
             </div>
             <div className="oc-module-list">
               {dashboard.providers.map((provider) => (
                 <ProviderRow key={provider.name} provider={provider} />
               ))}
+              {dashboard.configuration_validation.issues.map((issue) => (
+                <div className="oc-module-row" key={`${issue.provider}:${issue.message}`}>
+                  <div>
+                    <strong>{issue.provider}</strong>
+                    <p>{issue.message}</p>
+                  </div>
+                  <span className={issueClass(issue.severity)}>{issue.severity}</span>
+                </div>
+              ))}
+              {dashboard.configuration_validation.issues.length === 0 ? (
+                <p className="oc-empty-state">Configuration validation found no provider issues.</p>
+              ) : null}
             </div>
           </section>
 

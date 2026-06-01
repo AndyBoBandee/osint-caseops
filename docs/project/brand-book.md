@@ -80,7 +80,9 @@ The current app surface is the Fraud Monitor dashboard:
 - Recent public results.
 - Analyst review status.
 - Evidence-link saving.
+- Provider configuration validation.
 - Basic trend grouping.
+- Markdown and JSON exports for reviewed local data.
 
 Broader case, entity, graph, timeline, and report workflows are legacy OSINT CaseOps direction unless explicitly reintroduced into the Fraud Monitor roadmap.
 

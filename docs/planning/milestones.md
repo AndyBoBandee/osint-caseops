@@ -183,7 +183,7 @@ Verification:
 
 ## Milestone 7: Local Export And Audit Bundle
 
-Status: Planned.
+Status: Complete.
 
 Deliverables:
 
@@ -205,11 +205,12 @@ Verification:
 
 - API tests cover export structure, escaping, local-only data access, and empty
   state behavior.
-- Smoke or rendered QA verifies a user-visible export flow.
+- Smoke verifies the user-visible export controls and both export endpoints with
+  deterministic fixture-provider coverage.
 
 ## Milestone 8: Pilot Readiness
 
-Status: Planned.
+Status: Complete.
 
 Deliverables:
 
@@ -230,6 +231,7 @@ Acceptance:
 Verification:
 
 - `make bootstrap`, `make check`, and `make smoke` pass from a clean checkout.
-- Rendered QA validates the primary dashboard workflow.
+- Rendered QA validates the primary dashboard workflow with fixture-provider
+  configuration, review, evidence, and export controls.
 - Documentation review confirms the legacy path is labeled as legacy and current
   next work follows the Fraud Monitor milestones.

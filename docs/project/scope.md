@@ -14,6 +14,8 @@ Core capabilities:
 - Stored result review.
 - Review statuses: pending, relevant, and not relevant.
 - Evidence-link saving with analyst notes.
+- Markdown and JSON exports for reviewed local results.
+- Provider configuration validation with fixture-only test-mode warnings.
 - Basic trend grouping by keyword, source, time window, and repeated theme.
 - Local SQLite storage.
 - Responsible-use guidance for passive public-source research.
@@ -47,3 +49,5 @@ The current slice is successful when a user can:
 - Mark results relevant or not relevant.
 - Save a source as evidence.
 - See provider, job, and trend context without leaving the app.
+- Validate provider configuration before a pilot run.
+- Export reviewed local data without cloud sync.

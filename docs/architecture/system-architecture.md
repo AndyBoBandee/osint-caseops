@@ -24,8 +24,11 @@ The current web app provides a focused Fraud Monitor dashboard:
 - Review queue.
 - Job history.
 - Trend groups.
+- Provider configuration validation.
+- Local Markdown and JSON exports.
 
-The broader analyst workspace remains product direction:
+The broader analyst workspace below is legacy reference direction unless explicitly reintroduced in
+the Fraud Monitor roadmap:
 
 - Case dashboard.
 - Entity forms.
@@ -40,6 +43,7 @@ The broader analyst workspace remains product direction:
 The API owns application logic:
 
 - Fraud monitor dashboard, job, schedule, review, and evidence wrapper endpoints.
+- Fraud monitor provider validation and local export endpoints.
 - Case, entity, evidence, finding, and relationship endpoints.
 - Enrichment orchestration.
 - Report generation.
@@ -50,14 +54,10 @@ The API owns application logic:
 
 SQLite stores structured investigation data:
 
-- Cases.
-- Entities.
-- Findings.
-- Evidence metadata.
-- Relationships.
-- Enrichment runs.
-- Timeline events.
-- Report export metadata.
+- Active Fraud Monitor data: the system fraud-monitor case, news runs, news results, evidence links,
+  schedule settings, jobs, and provider job mappings.
+- Legacy/reference data model: cases, entities, findings, relationships, enrichment runs, timeline
+  events, and report export metadata.
 
 ### Evidence Storage
 

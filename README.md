@@ -11,6 +11,8 @@ This repository is being narrowed back to a focused app foundation. The current 
 - Uses no-key providers by default: GDELT, Google News RSS, and Hacker News Algolia.
 - Supports optional Brave News Search when `BRAVE_SEARCH_API_KEY` is configured.
 - Stores runs, results, review status, trend groups, and evidence links in local SQLite.
+- Validates provider configuration and separates fixture-only test mode from real provider runs.
+- Exports reviewed local data as Markdown reports or JSON audit bundles.
 - Runs locally by default with FastAPI, Next.js, SQLite, and Docker Compose.
 
 ## Why It Exists
@@ -46,6 +48,8 @@ make smoke
 
 `make dev` runs the API at `http://127.0.0.1:8000` and the web app at `http://127.0.0.1:3000`. `make smoke` runs the Docker Compose stack, verifies API, SQLite, the Fraud Monitor dashboard, and the schedule API without making live provider calls, then shuts the stack down.
 
+For a first local pilot, follow `docs/operations/pilot-readiness.md`.
+
 ## Project Layout
 
 - `apps/web/`: Next.js frontend.
@@ -62,11 +66,15 @@ make smoke
 - Enable or disable local scheduled `fraud` scans.
 - Review stored public results and mark them pending, relevant, or not relevant.
 - Save source links as evidence records for later analysis.
+- Export reviewed results as a Markdown report or JSON audit bundle.
 
 ## Documentation
 
 Start with:
 
+- `docs/operations/pilot-readiness.md`
+- `docs/operations/local-development.md`
+- `docs/planning/milestones.md`
 - `docs/project/brand-book.md`
 - `docs/project/scope.md`
 - `docs/product/mvp.md`

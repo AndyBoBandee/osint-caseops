@@ -1,4 +1,5 @@
 export type ProviderStatus = "ready" | "missing_config" | "unsupported" | "timeout" | "partial_success";
+export type ValidationSeverity = "error" | "warning" | "info";
 export type NewsReviewStatus = "pending" | "relevant" | "not_relevant";
 export type NewsRunStatus = "success" | "partial" | "failed";
 export type TrendGroupType = "keyword" | "source" | "time_window" | "theme";
@@ -22,6 +23,21 @@ export type ProviderInfo = {
   last_result_count: number;
   last_error_message: string;
   next_retry_at: string;
+};
+
+export type ConfigurationIssue = {
+  severity: ValidationSeverity;
+  provider: string;
+  message: string;
+};
+
+export type FraudMonitorConfigurationValidation = {
+  is_valid: boolean;
+  fixture_mode: boolean;
+  provider_count: number;
+  ready_provider_count: number;
+  issues: ConfigurationIssue[];
+  recommendations: string[];
 };
 
 export type FraudMonitorSchedule = {
@@ -112,6 +128,7 @@ export type FraudMonitorDashboardData = {
   keyword: string;
   case_id: string;
   providers: ProviderInfo[];
+  configuration_validation: FraudMonitorConfigurationValidation;
   schedule: FraudMonitorSchedule;
   latest_job: FraudMonitorJob | null;
   jobs: FraudMonitorJob[];
