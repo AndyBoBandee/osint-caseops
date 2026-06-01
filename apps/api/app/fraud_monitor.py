@@ -24,6 +24,7 @@ from app.news_monitoring import (
     ReviewStatus,
     RunStatus,
     TrendSummary,
+    filter_static_news_results,
     get_evidence_link_or_404,
     get_news_result_or_404,
     get_news_trends,
@@ -124,6 +125,15 @@ class FraudMonitorRuntime(BaseModel):
     last_error_at: str
 
 
+class FraudMonitorProviderRunSummary(BaseModel):
+    provider: str
+    status: RunStatus
+    raw_result_count: int
+    stored_result_count: int
+    filtered_result_count: int
+    note: str
+
+
 class FraudMonitorJob(BaseModel):
     id: str
     keyword: str
@@ -136,6 +146,7 @@ class FraudMonitorJob(BaseModel):
     error_message: str
     created_at: str
     provider_runs: list[str] = Field(default_factory=list)
+    provider_run_summaries: list[FraudMonitorProviderRunSummary] = Field(default_factory=list)
 
 
 class FraudMonitorResultPage(BaseModel):
@@ -478,6 +489,7 @@ def row_to_schedule(row: dict[str, Any]) -> FraudMonitorSchedule:
 def row_to_job(row: sqlite3.Row, provider_runs: list[str]) -> FraudMonitorJob:
     payload = dict(row)
     payload["provider_runs"] = provider_runs
+    payload["provider_run_summaries"] = []
     return FraudMonitorJob(**payload)
 
 
@@ -493,19 +505,39 @@ def list_jobs(connection: sqlite3.Connection, limit: int = 12) -> list[FraudMoni
     ).fetchall()
     jobs: list[FraudMonitorJob] = []
     for row in rows:
-        provider_runs = [
-            provider_row["provider"]
-            for provider_row in connection.execute(
-                """
-                SELECT provider
-                FROM fraud_monitor_job_runs
-                WHERE job_id = ?
-                ORDER BY provider
-                """,
-                (row["id"],),
-            ).fetchall()
+        provider_rows = connection.execute(
+            """
+            SELECT
+                fraud_monitor_job_runs.provider,
+                news_ingestion_runs.status,
+                news_ingestion_runs.raw_result_count,
+                news_ingestion_runs.result_count,
+                news_ingestion_runs.filtered_result_count
+            FROM fraud_monitor_job_runs
+            JOIN news_ingestion_runs ON news_ingestion_runs.id = fraud_monitor_job_runs.news_run_id
+            WHERE fraud_monitor_job_runs.job_id = ?
+            ORDER BY fraud_monitor_job_runs.provider
+            """,
+            (row["id"],),
+        ).fetchall()
+        provider_runs = [provider_row["provider"] for provider_row in provider_rows]
+        job = row_to_job(row, provider_runs)
+        job.provider_run_summaries = [
+            FraudMonitorProviderRunSummary(
+                provider=provider_row["provider"],
+                status=provider_row["status"],
+                raw_result_count=int(provider_row["raw_result_count"] or 0),
+                stored_result_count=int(provider_row["result_count"] or 0),
+                filtered_result_count=int(provider_row["filtered_result_count"] or 0),
+                note=(
+                    f"Filtered {int(provider_row['filtered_result_count'] or 0)} static/non-news result(s)."
+                    if int(provider_row["filtered_result_count"] or 0) > 0
+                    else "No static/non-news results filtered."
+                ),
+            )
+            for provider_row in provider_rows
         ]
-        jobs.append(row_to_job(row, provider_runs))
+        jobs.append(job)
     return jobs
 
 
@@ -717,6 +749,12 @@ def next_run_after(
     return minutes_from_now(interval_minutes)
 
 
+def filter_note(filtered_reasons: list[str]) -> str:
+    if not filtered_reasons:
+        return ""
+    return f"Filtered {len(filtered_reasons)} static/non-news result(s)."
+
+
 def create_provider_run(
     connection: sqlite3.Connection,
     case_id: str,
@@ -744,11 +782,13 @@ def create_provider_run(
             started_at,
             completed_at,
             query_keywords_json,
-            result_count,
-            error_message,
-            created_at
-        )
-        VALUES (?, ?, NULL, ?, 'failed', ?, ?, ?, 0, '', ?)
+                raw_result_count,
+                result_count,
+                filtered_result_count,
+                error_message,
+                created_at
+            )
+        VALUES (?, ?, NULL, ?, 'failed', ?, ?, ?, 0, 0, 0, '', ?)
         """,
         (
             run_id,
@@ -760,20 +800,37 @@ def create_provider_run(
             started_at,
         ),
     )
-    stored_results = store_news_results(connection, case_id, run_id, provider_results)
+    raw_result_count = len(provider_results)
+    filtered_results, filtered_reasons = filter_static_news_results(provider_results)
+    stored_results = store_news_results(connection, case_id, run_id, filtered_results)
     completed_at = utc_now()
-    run_status, error_message = summarize_run_status([keyword], errors, len(stored_results))
+    run_status, error_message = summarize_run_status(
+        [keyword],
+        errors,
+        len(stored_results) + len(filtered_reasons),
+    )
     connection.execute(
         """
         UPDATE news_ingestion_runs
         SET status = ?,
             completed_at = ?,
+            raw_result_count = ?,
             result_count = ?,
+            filtered_result_count = ?,
             error_message = ?,
             created_at = ?
         WHERE id = ?
         """,
-        (run_status, completed_at, len(stored_results), error_message, completed_at, run_id),
+        (
+            run_status,
+            completed_at,
+            raw_result_count,
+            len(stored_results),
+            len(filtered_reasons),
+            error_message,
+            completed_at,
+            run_id,
+        ),
     )
     return run_id, run_status, len(stored_results), error_message
 

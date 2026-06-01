@@ -43,6 +43,14 @@ when:
 - `fixture` is only used for tests or smoke checks.
 - Unknown provider names are removed from `OSINT_CASEOPS_FRAUD_MONITOR_PROVIDERS`.
 
+For a Brave-backed local pilot, keep the key outside Git and export it before starting the app:
+
+```sh
+export BRAVE_SEARCH_API_KEY="your-local-key"
+export OSINT_CASEOPS_FRAUD_MONITOR_PROVIDERS=brave,hn_algolia
+make dev
+```
+
 Fixture mode is deterministic and local-test oriented:
 
 ```sh

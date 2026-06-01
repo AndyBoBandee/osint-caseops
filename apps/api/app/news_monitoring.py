@@ -6,7 +6,7 @@ import re
 import sqlite3
 from typing import Any, Literal
 from urllib.error import HTTPError, URLError
-from urllib.parse import unquote, urlencode
+from urllib.parse import unquote, urlencode, urlsplit
 from urllib.request import Request, urlopen
 from uuid import uuid4
 from xml.etree import ElementTree
@@ -349,7 +349,9 @@ class NewsIngestionRunRecord(BaseModel):
     started_at: str
     completed_at: str
     query_keywords: list[str]
+    raw_result_count: int = 0
     result_count: int
+    filtered_result_count: int = 0
     error_message: str
     created_at: str
     results: list[NewsResultRecord] = Field(default_factory=list)
@@ -555,10 +557,18 @@ def fetch_json(url: str, headers: dict[str, str] | None = None) -> dict[str, Any
         raise RuntimeError(f"News provider request failed: {exc}") from exc
 
 
+def build_provider_query(keyword: str, provider: str) -> str:
+    cleaned_keyword = normalize_keyword(keyword)
+    if provider.lower() == "brave" and cleaned_keyword == "fraud":
+        return "fraud (report OR warning OR investigation OR charged OR lawsuit OR enforcement)"
+    return cleaned_keyword
+
+
 def search_gdelt(keyword: str, max_results: int) -> list[ProviderResult]:
+    query = build_provider_query(keyword, "gdelt")
     params = urlencode(
         {
-            "query": keyword,
+            "query": query,
             "mode": "ArtList",
             "format": "json",
             "maxrecords": max(1, min(max_results, 50)),
@@ -596,7 +606,8 @@ def search_gdelt(keyword: str, max_results: int) -> list[ProviderResult]:
 
 
 def search_google_news_rss(keyword: str, max_results: int) -> list[ProviderResult]:
-    params = urlencode({"q": keyword, "hl": "en-US", "gl": "US", "ceid": "US:en"})
+    query = build_provider_query(keyword, "google_news_rss")
+    params = urlencode({"q": query, "hl": "en-US", "gl": "US", "ceid": "US:en"})
     request = Request(
         f"https://news.google.com/rss/search?{params}",
         headers={
@@ -639,9 +650,10 @@ def search_google_news_rss(keyword: str, max_results: int) -> list[ProviderResul
 
 
 def search_hn_algolia(keyword: str, max_results: int) -> list[ProviderResult]:
+    query = build_provider_query(keyword, "hn_algolia")
     params = urlencode(
         {
-            "query": keyword,
+            "query": query,
             "tags": "story",
             "hitsPerPage": max(1, min(max_results, 50)),
         }
@@ -684,7 +696,8 @@ def search_brave(keyword: str, max_results: int) -> list[ProviderResult]:
     if not settings.brave_search_api_key:
         raise RuntimeError("BRAVE_SEARCH_API_KEY is required when OSINT_CASEOPS_NEWS_PROVIDER=brave.")
 
-    params = urlencode({"q": keyword, "count": max(1, min(max_results, 20)), "freshness": "pm"})
+    query = build_provider_query(keyword, "brave")
+    params = urlencode({"q": query, "count": max(1, min(max_results, 20)), "freshness": "pm"})
     payload = fetch_json(
         f"https://api.search.brave.com/res/v1/news/search?{params}",
         headers={
@@ -774,6 +787,107 @@ def search_public_news_with_provider(
     if normalized_provider == "fixture":
         return search_fixture_news(keyword, limit)
     raise RuntimeError(f"Unsupported news provider: {provider}.")
+
+
+STATIC_URL_EXTENSIONS = {
+    ".7z",
+    ".avi",
+    ".avif",
+    ".bmp",
+    ".css",
+    ".csv",
+    ".doc",
+    ".docx",
+    ".eot",
+    ".gif",
+    ".gz",
+    ".ico",
+    ".jpeg",
+    ".jpg",
+    ".js",
+    ".json",
+    ".map",
+    ".mov",
+    ".mp3",
+    ".mp4",
+    ".ogg",
+    ".otf",
+    ".pdf",
+    ".png",
+    ".rar",
+    ".svg",
+    ".tar",
+    ".ttf",
+    ".webm",
+    ".webp",
+    ".woff",
+    ".woff2",
+    ".xls",
+    ".xlsx",
+    ".xml",
+    ".zip",
+}
+STATIC_PATH_SEGMENTS = {
+    "_next",
+    "asset",
+    "assets",
+    "cdn-cgi",
+    "dist",
+    "fonts",
+    "images",
+    "img",
+    "js",
+    "scripts",
+    "static",
+    "styles",
+}
+ARTICLE_PATH_SEGMENTS = {
+    "article",
+    "articles",
+    "blog",
+    "news",
+    "press-release",
+    "press-releases",
+    "report",
+    "reports",
+    "story",
+    "stories",
+}
+
+
+def static_result_reason(result: ProviderResult) -> str:
+    parsed = urlsplit(result.source_url)
+    path = unquote(parsed.path).lower()
+    filename = path.rsplit("/", 1)[-1]
+    if "." in filename:
+        extension = f".{filename.rsplit('.', 1)[-1]}"
+        if extension in STATIC_URL_EXTENSIONS:
+            return f"static asset extension {extension}"
+
+    path_segments = {segment for segment in path.split("/") if segment}
+    if path_segments & STATIC_PATH_SEGMENTS:
+        return "static asset path"
+
+    title = result.title.strip()
+    snippet = result.snippet.strip()
+    if title or snippet:
+        return ""
+
+    if path_segments & ARTICLE_PATH_SEGMENTS:
+        return ""
+    return "empty title and snippet"
+
+
+def filter_static_news_results(results: list[ProviderResult]) -> tuple[list[ProviderResult], list[str]]:
+    kept: list[ProviderResult] = []
+    filtered_reasons: list[str] = []
+    for result in results:
+        reason = static_result_reason(result)
+        if reason:
+            filtered_reasons.append(reason)
+            continue
+        kept.append(result)
+    return kept, filtered_reasons
 
 
 def search_public_news(keyword: str, max_results: int | None = None) -> list[ProviderResult]:

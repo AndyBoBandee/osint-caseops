@@ -8,8 +8,8 @@ This repository is being narrowed back to a focused app foundation. The current 
 
 - Runs one fixed keyword monitor for `fraud`.
 - Supports manual runs and a local cron-style scheduler while the API process is running.
-- Uses no-key providers by default: GDELT, Google News RSS, and Hacker News Algolia.
-- Supports optional Brave News Search when `BRAVE_SEARCH_API_KEY` is configured.
+- Uses Brave News Search as the primary live provider when `BRAVE_SEARCH_API_KEY` is configured,
+  with Hacker News Algolia as the no-key fallback.
 - Stores runs, results, review status, trend groups, and evidence links in local SQLite.
 - Validates provider configuration and separates fixture-only test mode from real provider runs.
 - Exports reviewed local data as Markdown reports or JSON audit bundles.

@@ -4,7 +4,7 @@ from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
-from app import fraud_monitor
+from app import fraud_monitor, news_monitoring
 from app.core.config import get_settings
 from app.main import app
 from app.news_monitoring import ProviderResult
@@ -13,11 +13,16 @@ from app.news_monitoring import ProviderResult
 def make_client(
     data_dir: Path,
     monkeypatch,
-    providers: str = "gdelt,hn_algolia",
+    providers: str = "brave,hn_algolia",
     fixture_enabled: bool = False,
+    brave_key: str | None = "test-brave-key",
 ) -> TestClient:
     monkeypatch.setenv("OSINT_CASEOPS_DATA_DIR", str(data_dir))
     monkeypatch.setenv("OSINT_CASEOPS_FRAUD_MONITOR_PROVIDERS", providers)
+    if brave_key is None:
+        monkeypatch.delenv("BRAVE_SEARCH_API_KEY", raising=False)
+    else:
+        monkeypatch.setenv("BRAVE_SEARCH_API_KEY", brave_key)
     if fixture_enabled:
         monkeypatch.setenv("OSINT_CASEOPS_ENABLE_FIXTURE_PROVIDER", "1")
     else:
@@ -48,7 +53,7 @@ def test_dashboard_bootstraps_single_fraud_monitor_case(tmp_path: Path, monkeypa
     assert dashboard["case_id"] == fraud_monitor.FRAUD_MONITOR_CASE_ID
     assert dashboard["schedule"]["enabled"] is False
     assert dashboard["schedule"]["interval_minutes"] == 60
-    assert [provider["name"] for provider in dashboard["providers"]] == ["gdelt", "hn_algolia"]
+    assert [provider["name"] for provider in dashboard["providers"]] == ["brave", "hn_algolia"]
     assert dashboard["runtime"]["is_running"] is False
     assert dashboard["runtime"]["ready_provider_count"] == 2
     assert dashboard["runtime"]["last_error_message"] == ""
@@ -78,14 +83,135 @@ def test_manual_fraud_job_runs_configured_providers_and_stores_results(
     job = run_response.json()
     assert job["status"] == "success"
     assert job["trigger_type"] == "manual"
-    assert job["provider_runs"] == ["gdelt", "hn_algolia"]
+    assert job["provider_runs"] == ["brave", "hn_algolia"]
     assert job["result_count"] == 2
 
     dashboard = dashboard_response.json()
     assert dashboard["total_results"] == 2
     assert dashboard["pending_results"] == 2
     assert {result["keyword"] for result in dashboard["results"]} == {"fraud"}
-    assert {result["provider"] for result in dashboard["results"]} == {"gdelt", "hn_algolia"}
+    assert {result["provider"] for result in dashboard["results"]} == {"brave", "hn_algolia"}
+    summaries = dashboard["latest_job"]["provider_run_summaries"]
+    assert {summary["provider"] for summary in summaries} == {"brave", "hn_algolia"}
+    assert all(summary["raw_result_count"] == 1 for summary in summaries)
+    assert all(summary["stored_result_count"] == 1 for summary in summaries)
+    assert all(summary["filtered_result_count"] == 0 for summary in summaries)
+
+
+def test_brave_provider_uses_clean_query_and_keyed_readiness(tmp_path: Path, monkeypatch) -> None:
+    assert (
+        news_monitoring.build_provider_query("fraud", "brave")
+        == "fraud (report OR warning OR investigation OR charged OR lawsuit OR enforcement)"
+    )
+    assert news_monitoring.build_provider_query("fraud", "hn_algolia") == "fraud"
+
+    with make_client(tmp_path, monkeypatch, providers="brave", brave_key=None) as client:
+        missing_dashboard = client.get("/fraud-monitor/dashboard").json()
+
+    with make_client(tmp_path / "ready", monkeypatch, providers="brave", brave_key="local-test-key") as client:
+        ready_dashboard = client.get("/fraud-monitor/dashboard").json()
+
+    assert missing_dashboard["providers"][0]["status"] == "missing_config"
+    assert ready_dashboard["providers"][0]["status"] == "ready"
+
+
+def test_static_non_news_results_are_filtered_before_storage(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    def fake_search(keyword: str, provider: str) -> list[ProviderResult]:
+        return [
+            ProviderResult(
+                keyword=keyword,
+                source_url="https://news.example/articles/fraud-warning",
+                publisher="Example News",
+                title="Agency fraud warning",
+                snippet="Public reporting describes fraud enforcement activity.",
+                published_at="2026-05-30T12:00:00Z",
+                retrieved_at="2026-05-30T12:05:00Z",
+            ),
+            ProviderResult(
+                keyword=keyword,
+                source_url="https://cdn.example/assets/app.js",
+                publisher="Example CDN",
+                title="",
+                snippet="",
+                published_at="",
+                retrieved_at="2026-05-30T12:05:00Z",
+            ),
+            ProviderResult(
+                keyword=keyword,
+                source_url="https://static.example.com/newsletter",
+                publisher="Static Example",
+                title="",
+                snippet="",
+                published_at="",
+                retrieved_at="2026-05-30T12:05:00Z",
+            ),
+        ]
+
+    monkeypatch.setattr(fraud_monitor, "search_public_news_with_provider", fake_search)
+
+    with make_client(tmp_path, monkeypatch, providers="brave") as client:
+        run_response = client.post("/fraud-monitor/jobs")
+        dashboard = client.get("/fraud-monitor/dashboard").json()
+
+    assert run_response.status_code == 200
+    assert run_response.json()["status"] == "success"
+    assert run_response.json()["result_count"] == 1
+    assert run_response.json()["error_message"] == ""
+    assert dashboard["total_results"] == 1
+    assert dashboard["results"][0]["source_url"] == "https://news.example/articles/fraud-warning"
+    summary = dashboard["latest_job"]["provider_run_summaries"][0]
+    assert summary["provider"] == "brave"
+    assert summary["raw_result_count"] == 3
+    assert summary["stored_result_count"] == 1
+    assert summary["filtered_result_count"] == 2
+    assert summary["note"] == "Filtered 2 static/non-news result(s)."
+    assert dashboard["runtime"]["last_error_message"] == ""
+
+
+def test_all_static_results_are_filtered_without_failing_provider(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    def fake_search(keyword: str, provider: str) -> list[ProviderResult]:
+        return [
+            ProviderResult(
+                keyword=keyword,
+                source_url="https://cdn.example/assets/fraud.css",
+                publisher="Example CDN",
+                title="",
+                snippet="",
+                published_at="",
+                retrieved_at="2026-05-30T12:05:00Z",
+            )
+        ]
+
+    monkeypatch.setattr(fraud_monitor, "search_public_news_with_provider", fake_search)
+
+    with make_client(tmp_path, monkeypatch, providers="brave") as client:
+        run_response = client.post("/fraud-monitor/jobs")
+        dashboard = client.get("/fraud-monitor/dashboard").json()
+
+    assert run_response.status_code == 200
+    assert run_response.json()["status"] == "success"
+    assert run_response.json()["result_count"] == 0
+    assert run_response.json()["error_message"] == ""
+    assert dashboard["total_results"] == 0
+    assert dashboard["providers"][0]["status"] == "ready"
+    assert dashboard["latest_job"]["provider_run_summaries"][0]["filtered_result_count"] == 1
+
+
+def test_docker_compose_passes_brave_key_and_defaults_to_brave_primary() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    compose_text = (repo_root / "infra/docker/docker-compose.yml").read_text()
+
+    assert (
+        "OSINT_CASEOPS_FRAUD_MONITOR_PROVIDERS: "
+        "${OSINT_CASEOPS_FRAUD_MONITOR_PROVIDERS:-brave,hn_algolia}"
+    ) in compose_text
+    assert "BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY:-}" in compose_text
 
 
 def test_fraud_results_store_source_derived_state_metadata_and_search(
@@ -237,7 +363,7 @@ def test_fraud_job_records_partial_provider_failures(tmp_path: Path, monkeypatch
 
     monkeypatch.setattr(fraud_monitor, "search_public_news_with_provider", fake_search)
 
-    with make_client(tmp_path, monkeypatch) as client:
+    with make_client(tmp_path, monkeypatch, providers="gdelt,hn_algolia") as client:
         response = client.post("/fraud-monitor/jobs")
         dashboard = client.get("/fraud-monitor/dashboard").json()
 
@@ -256,7 +382,12 @@ def test_provider_health_distinguishes_missing_config_unsupported_and_partial_su
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    with make_client(tmp_path, monkeypatch, providers="brave,unknown,hn_algolia") as client:
+    with make_client(
+        tmp_path,
+        monkeypatch,
+        providers="brave,unknown,hn_algolia",
+        brave_key=None,
+    ) as client:
         client.get("/fraud-monitor/dashboard")
         with fraud_monitor.connect() as connection:
             settings = fraud_monitor.ensure_monitor_settings(connection)
@@ -301,7 +432,12 @@ def test_configuration_validation_flags_provider_errors_and_fixture_mode(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    with make_client(tmp_path, monkeypatch, providers="brave,unknown,fixture") as client:
+    with make_client(
+        tmp_path,
+        monkeypatch,
+        providers="brave,unknown,fixture",
+        brave_key=None,
+    ) as client:
         invalid_response = client.get("/fraud-monitor/configuration/validation")
 
     assert invalid_response.status_code == 200

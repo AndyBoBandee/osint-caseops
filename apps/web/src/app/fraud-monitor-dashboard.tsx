@@ -911,6 +911,12 @@ export function FraudMonitorDashboard({
                       : `${job.provider_count} provider(s)`}
                   </p>
                   {job.error_message ? <p>{job.error_message}</p> : null}
+                  {job.provider_run_summaries.map((summary) => (
+                    <p key={`${job.id}:${summary.provider}`}>
+                      {providerLabel(summary.provider)} stored {summary.stored_result_count} of{" "}
+                      {summary.raw_result_count} returned result(s). {summary.note}
+                    </p>
+                  ))}
                 </div>
                 <span className={statusClass(job.status)}>{job.status}</span>
               </div>

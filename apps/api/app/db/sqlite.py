@@ -99,7 +99,9 @@ def initialize_database() -> None:
                 started_at TEXT NOT NULL,
                 completed_at TEXT NOT NULL,
                 query_keywords_json TEXT NOT NULL DEFAULT '[]',
+                raw_result_count INTEGER NOT NULL DEFAULT 0,
                 result_count INTEGER NOT NULL DEFAULT 0,
+                filtered_result_count INTEGER NOT NULL DEFAULT 0,
                 error_message TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL
             );
@@ -258,6 +260,18 @@ def initialize_database() -> None:
             "news_results",
             "fraud_state_terms_json",
             "TEXT NOT NULL DEFAULT '[]'",
+        )
+        ensure_column(
+            connection,
+            "news_ingestion_runs",
+            "raw_result_count",
+            "INTEGER NOT NULL DEFAULT 0",
+        )
+        ensure_column(
+            connection,
+            "news_ingestion_runs",
+            "filtered_result_count",
+            "INTEGER NOT NULL DEFAULT 0",
         )
 
 

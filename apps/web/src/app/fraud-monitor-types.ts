@@ -68,6 +68,16 @@ export type FraudMonitorJob = {
   error_message: string;
   created_at: string;
   provider_runs: string[];
+  provider_run_summaries: FraudMonitorProviderRunSummary[];
+};
+
+export type FraudMonitorProviderRunSummary = {
+  provider: string;
+  status: NewsRunStatus;
+  raw_result_count: number;
+  stored_result_count: number;
+  filtered_result_count: number;
+  note: string;
 };
 
 export type NewsResultRecord = {
