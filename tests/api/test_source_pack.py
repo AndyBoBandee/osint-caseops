@@ -176,3 +176,31 @@ def test_trend_endpoints_use_normalized_source_pack_fields(tmp_path: Path, monke
     assert dashboard["trend_overview"]["top_categories_this_week"]
     assert dashboard["results"][0]["fraud_category"] == "account_takeover"
     assert dashboard["results"][0]["payment_rail"] == "zelle"
+
+
+def test_reviewability_filter_preserves_high_confidence_official_history() -> None:
+    general_old = ProviderResult(
+        keyword="fraud",
+        source_url="https://news.example/old-fraud-story",
+        publisher="Example News",
+        title="Old fraud story",
+        snippet="General public reporting from an old archive.",
+        published_at="2014-05-30T12:00:00Z",
+        retrieved_at="2026-05-30T12:05:00Z",
+    )
+    official_old = ProviderResult(
+        keyword="fraud",
+        source_url="https://www.justice.gov/opa/pr/historic-wire-fraud",
+        publisher="U.S. Department of Justice",
+        title="Historic wire fraud enforcement record",
+        snippet="Official source describes an enforcement action.",
+        published_at="2014-05-30T12:00:00Z",
+        retrieved_at="2026-05-30T12:05:00Z",
+        source_type="official_enforcement",
+        source_confidence="high",
+    )
+
+    kept, filtered = news_monitoring.filter_static_news_results([general_old, official_old])
+
+    assert [result.source_url for result in kept] == ["https://www.justice.gov/opa/pr/historic-wire-fraud"]
+    assert filtered == ["older than 730 days"]

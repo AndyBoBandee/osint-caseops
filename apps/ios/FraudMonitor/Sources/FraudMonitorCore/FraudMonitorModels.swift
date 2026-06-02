@@ -1,5 +1,15 @@
 import Foundation
 
+public struct APIHealth: Codable, Sendable {
+    public let status: String
+    public let service: String
+}
+
+public struct DatabaseHealth: Codable, Sendable {
+    public let status: String
+    public let database: String
+}
+
 public struct DashboardData: Codable, Sendable {
     public let keyword: String
     public let providers: [ProviderInfo]

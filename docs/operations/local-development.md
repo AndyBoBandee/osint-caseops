@@ -50,6 +50,8 @@ make api
 
 Then run `make mac-run` in a second terminal. The macOS app defaults to `http://127.0.0.1:8000` and does not start or stop the API process itself.
 
+The macOS app includes a local API status panel that checks `/health` and `/health/db`, shows the active base URL, and offers copyable launch commands for normal API, fixture API, and macOS app runs. Backend process lifecycle stays manual for this version.
+
 Docker Compose builds and starts the web service with `next start` so full-stack smoke checks do not rewrite development-only generated files. Use `make dev` or `make web` when you need frontend hot reload.
 
 ## Local Data Paths
@@ -165,6 +167,14 @@ OSINT_CASEOPS_FRAUD_MONITOR_PROVIDERS=fixture
 
 The `fixture` provider is unsupported unless explicitly enabled. It returns local deterministic
 public-source-style records and never makes external requests.
+
+For source-pack and trend operator QA, run:
+
+```sh
+scripts/source_pack_trends_qa.sh
+```
+
+The script uses isolated data directories and temporary API ports to run fixture mode, configured no-key providers, and one DOJ official-source path. It verifies provider health, run storage, classification fields, trend summaries, review state, evidence-note save/edit behavior, and Markdown/JSON exports. The DOJ path makes passive public HTTP GET requests and should be treated as live-provider QA, not a deterministic unit test.
 
 Fraud Monitor runs one job at a time. Manual overlap returns `409 Conflict`; scheduled overlap is
 skipped and retried on the next scheduler tick without advancing `next_run_at`.

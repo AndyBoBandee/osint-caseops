@@ -34,6 +34,14 @@ public struct FraudMonitorClient: Sendable {
         try await request(path: "/fraud-monitor/dashboard", method: "GET")
     }
 
+    public func apiHealth() async throws -> APIHealth {
+        try await request(path: "/health", method: "GET")
+    }
+
+    public func databaseHealth() async throws -> DatabaseHealth {
+        try await request(path: "/health/db", method: "GET")
+    }
+
     public func runJob(detailed: Bool) async throws -> MonitorJob {
         let body = detailed ? ["search_mode": "detailed"] : ["search_mode": "standard"]
         return try await request(path: "/fraud-monitor/jobs", method: "POST", body: body)

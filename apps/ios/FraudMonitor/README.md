@@ -40,10 +40,21 @@ You can change it in the macOS Settings window or the iOS Settings tab.
 ## macOS Analyst Workstation
 
 - Sidebar workspace: Monitor, Review Queue, Trends, Providers, and Settings overview.
-- Review Queue: search/filter stored results, select a result, review classification/source metadata, mark relevance, and save evidence notes.
+- Review Queue: dense desktop table, search/filter stored results, select a result with keyboard navigation, review classification/source metadata, mark relevance, and save evidence notes.
 - Trends: inspect category, official-source, state, payment rail, and keyword summaries.
 - Providers: inspect provider health, fixture warnings, and missing API-key state.
+- Local API status: check `/health` and `/health/db`, see the active base URL, and copy launch commands without letting the app start or stop backend processes.
 - Settings window: reconnect to a different API URL and review local-first constraints.
+
+## Source-Pack And Trends QA
+
+Run the operator QA script from the repo root when provider/trend behavior changes:
+
+```sh
+scripts/source_pack_trends_qa.sh
+```
+
+The script uses isolated local data directories, starts temporary API instances, and verifies fixture mode, configured no-key providers, and a DOJ official-source run. It checks provider health, stored classifications, trend summaries, review state, evidence-note save/edit, and Markdown/JSON exports.
 
 ## iOS Companion App
 

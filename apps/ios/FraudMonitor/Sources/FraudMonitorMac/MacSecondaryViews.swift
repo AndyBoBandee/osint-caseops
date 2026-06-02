@@ -38,6 +38,7 @@ struct MacProvidersView: View {
                     subtitle: "Configured source readiness and registry health.",
                     symbol: "antenna.radiowaves.left.and.right"
                 )
+                MacConnectionBanner()
 
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 360), spacing: 16)], spacing: 16) {
                     ForEach(store.dashboard.providers) { provider in
@@ -85,6 +86,7 @@ struct MacSettingsOverviewView: View {
                 subtitle: "Connection settings are available in the macOS Settings window.",
                 symbol: "gearshape"
             )
+            MacConnectionBanner()
 
             MacCard("Open Settings", symbol: "slider.horizontal.3") {
                 VStack(alignment: .leading, spacing: 10) {
@@ -110,9 +112,11 @@ struct MacSettingsView: View {
         Form {
             Section("API") {
                 TextField("Base URL", text: $store.baseURLText)
+                    .accessibilityLabel("API base URL")
                 Button("Reconnect") {
                     Task { await store.refresh() }
                 }
+                .accessibilityLabel("Reconnect to local API")
             }
 
             Section("Scheduler") {
@@ -123,6 +127,7 @@ struct MacSettingsView: View {
                         set: { enabled in Task { await store.setSchedule(enabled: enabled) } }
                     )
                 )
+                .accessibilityLabel("Enable scheduled scans")
                 LabeledContent("Interval", value: "\(store.dashboard.schedule.intervalMinutes) min")
                 LabeledContent("Last run", value: store.dashboard.schedule.lastCompletedAt.readableDate)
                 LabeledContent("Next run", value: store.dashboard.schedule.nextRunAt.readableDate)
@@ -236,5 +241,8 @@ struct ProviderHealthCard: View {
                 }
             }
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Provider \(provider.displayName)")
+        .accessibilityValue("\(provider.status.displayLabel), \(provider.sourceConfidence.displayLabel), \(provider.resultsLast24h) results in 24 hours")
     }
 }

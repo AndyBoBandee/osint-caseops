@@ -38,6 +38,7 @@ EvidenceArtifactAvailability = Literal["available", "not_captured"]
 NEWS_TIMEOUT_SECONDS = 8
 MAX_NEWS_BODY_BYTES = 512_000
 MAX_KEYWORDS = 12
+MAX_GENERAL_RESULT_AGE_DAYS = 730
 ALLOWED_KEYWORD_TERMS = {
     "abuse",
     "brand",
@@ -1513,10 +1514,47 @@ ARTICLE_PATH_SEGMENTS = {
     "story",
     "stories",
 }
+LOW_SIGNAL_HOSTS = {
+    "facebook.com",
+    "instagram.com",
+    "tiktok.com",
+    "twitter.com",
+    "x.com",
+    "youtube.com",
+    "youtu.be",
+}
+
+
+def host_matches(host: str, blocked_host: str) -> bool:
+    return host == blocked_host or host.endswith(f".{blocked_host}")
+
+
+def is_official_or_high_confidence(result: ProviderResult) -> bool:
+    return result.source_confidence == "high" or result.source_type.startswith("official_")
+
+
+def stale_general_result_reason(result: ProviderResult) -> str:
+    if is_official_or_high_confidence(result):
+        return ""
+    parsed = parse_source_datetime(result.published_at)
+    if parsed is None:
+        return ""
+    age_days = (datetime.now(UTC) - parsed).days
+    if age_days > MAX_GENERAL_RESULT_AGE_DAYS:
+        return f"older than {MAX_GENERAL_RESULT_AGE_DAYS} days"
+    return ""
 
 
 def static_result_reason(result: ProviderResult) -> str:
     parsed = urlsplit(result.source_url)
+    host = parsed.netloc.lower().removeprefix("www.")
+    if any(host_matches(host, blocked_host) for blocked_host in LOW_SIGNAL_HOSTS):
+        return "low-signal media or social host"
+
+    stale_reason = stale_general_result_reason(result)
+    if stale_reason:
+        return stale_reason
+
     path = unquote(parsed.path).lower()
     filename = path.rsplit("/", 1)[-1]
     if "." in filename:

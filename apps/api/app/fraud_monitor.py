@@ -802,9 +802,9 @@ def list_jobs(connection: sqlite3.Connection, limit: int = 12) -> list[FraudMoni
                 stored_result_count=int(provider_row["result_count"] or 0),
                 filtered_result_count=int(provider_row["filtered_result_count"] or 0),
                 note=(
-                    f"Filtered {int(provider_row['filtered_result_count'] or 0)} static/non-news result(s)."
+                    filter_note([""] * int(provider_row["filtered_result_count"] or 0))
                     if int(provider_row["filtered_result_count"] or 0) > 0
-                    else "No static/non-news results filtered."
+                    else "No low-signal, stale, or non-news results filtered."
                 ),
             )
             for provider_row in provider_rows
@@ -1516,7 +1516,7 @@ def next_run_after(
 def filter_note(filtered_reasons: list[str]) -> str:
     if not filtered_reasons:
         return ""
-    return f"Filtered {len(filtered_reasons)} static/non-news result(s)."
+    return f"Filtered {len(filtered_reasons)} low-signal, stale, or non-news result(s)."
 
 
 def create_provider_run(

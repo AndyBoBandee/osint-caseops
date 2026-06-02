@@ -11,12 +11,34 @@ public final class FraudMonitorStore {
         case failed(String)
     }
 
+    public enum BackendConnectionState: Equatable {
+        case unknown
+        case checking
+        case connected
+        case degraded(String)
+        case offline(String)
+    }
+
     public var dashboard: DashboardData = .empty
     public var phase: LoadPhase = .idle
     public var selectedResult: NewsResult?
+    public var selectedResultID: String?
     public var selectedProvider: ProviderInfo?
     public var baseURLText = "http://127.0.0.1:8000"
     public var draftEvidenceNote = ""
+    public var backendConnectionState: BackendConnectionState = .unknown
+    public var apiHealth: APIHealth?
+    public var databaseHealth: DatabaseHealth?
+    public var lastBackendCheckText = "Never"
+
+    public let apiLaunchCommand = "make api"
+    public let fixtureAPILaunchCommand = """
+    OSINT_CASEOPS_DATA_DIR=/tmp/osint-caseops-mac-data \\
+    OSINT_CASEOPS_ENABLE_FIXTURE_PROVIDER=1 \\
+    OSINT_CASEOPS_FRAUD_MONITOR_PROVIDERS=fixture \\
+    make api
+    """
+    public let macRunCommand = "make mac-run"
 
     public init() {}
 
@@ -26,11 +48,41 @@ public final class FraudMonitorStore {
 
     public func selectResult(_ result: NewsResult?) {
         selectedResult = result
+        selectedResultID = result?.id
         draftEvidenceNote = result?.evidenceAnalystNote ?? ""
+    }
+
+    public func selectResult(id: String?) {
+        selectedResultID = id
+        selectedResult = dashboard.results.first { $0.id == id }
+        draftEvidenceNote = selectedResult?.evidenceAnalystNote ?? ""
+    }
+
+    public func checkBackendHealth() async {
+        backendConnectionState = .checking
+        do {
+            async let api = client.apiHealth()
+            async let database = client.databaseHealth()
+            let (apiHealth, databaseHealth) = try await (api, database)
+            self.apiHealth = apiHealth
+            self.databaseHealth = databaseHealth
+            lastBackendCheckText = Date.now.formatted(date: .omitted, time: .shortened)
+            if apiHealth.status == "ok" && databaseHealth.status == "ok" {
+                backendConnectionState = .connected
+            } else {
+                backendConnectionState = .degraded("API: \(apiHealth.status), database: \(databaseHealth.status)")
+            }
+        } catch {
+            apiHealth = nil
+            databaseHealth = nil
+            lastBackendCheckText = Date.now.formatted(date: .omitted, time: .shortened)
+            backendConnectionState = .offline(error.localizedDescription)
+        }
     }
 
     public func refresh() async {
         phase = .loading
+        await checkBackendHealth()
         do {
             dashboard = try await client.dashboard()
             refreshSelections()
@@ -42,6 +94,7 @@ public final class FraudMonitorStore {
 
     public func run(detailed: Bool) async {
         phase = .loading
+        await checkBackendHealth()
         do {
             _ = try await client.runJob(detailed: detailed)
             dashboard = try await client.dashboard()
@@ -89,8 +142,14 @@ public final class FraudMonitorStore {
     }
 
     private func refreshSelections() {
-        if let selectedResult {
-            self.selectedResult = dashboard.results.first { $0.id == selectedResult.id } ?? selectedResult
+        if let selectedResultID {
+            self.selectedResult = dashboard.results.first { $0.id == selectedResultID }
+            if selectedResult == nil {
+                self.selectedResultID = nil
+                draftEvidenceNote = ""
+            } else {
+                draftEvidenceNote = selectedResult?.evidenceAnalystNote ?? draftEvidenceNote
+            }
         }
         if let selectedProvider {
             self.selectedProvider = dashboard.providers.first { $0.id == selectedProvider.id } ?? selectedProvider

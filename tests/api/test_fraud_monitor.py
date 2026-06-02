@@ -224,8 +224,60 @@ def test_static_non_news_results_are_filtered_before_storage(
     assert summary["raw_result_count"] == 3
     assert summary["stored_result_count"] == 1
     assert summary["filtered_result_count"] == 2
-    assert summary["note"] == "Filtered 2 static/non-news result(s)."
+    assert summary["note"] == "Filtered 2 low-signal, stale, or non-news result(s)."
     assert dashboard["runtime"]["last_error_message"] == ""
+
+
+def test_stale_media_results_are_filtered_before_storage(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    def fake_search(keyword: str, provider: str) -> list[ProviderResult]:
+        return [
+            ProviderResult(
+                keyword=keyword,
+                source_url="https://news.example/articles/current-fraud-warning",
+                publisher="Example News",
+                title="Current fraud warning",
+                snippet="Public reporting describes fraud enforcement activity.",
+                published_at="2026-05-30T12:00:00Z",
+                retrieved_at="2026-05-30T12:05:00Z",
+            ),
+            ProviderResult(
+                keyword=keyword,
+                source_url="https://www.youtube.com/watch?v=old-fraud-video",
+                publisher="YouTube",
+                title="Fraud video discussion",
+                snippet="A low-signal video result should not enter the analyst queue.",
+                published_at="2014-05-30T12:00:00Z",
+                retrieved_at="2026-05-30T12:05:00Z",
+            ),
+            ProviderResult(
+                keyword=keyword,
+                source_url="https://archive.example/articles/old-fraud-story",
+                publisher="Archive Example",
+                title="Old fraud article",
+                snippet="This general news result is stale for trend monitoring.",
+                published_at="2014-05-30T12:00:00Z",
+                retrieved_at="2026-05-30T12:05:00Z",
+            ),
+        ]
+
+    monkeypatch.setattr(fraud_monitor, "search_public_news_with_provider", fake_search)
+
+    with make_client(tmp_path, monkeypatch, providers="google_news_rss") as client:
+        run_response = client.post("/fraud-monitor/jobs")
+        dashboard = client.get("/fraud-monitor/dashboard").json()
+
+    assert run_response.status_code == 200
+    assert run_response.json()["result_count"] == 1
+    assert dashboard["total_results"] == 1
+    assert dashboard["results"][0]["source_url"] == "https://news.example/articles/current-fraud-warning"
+    summary = dashboard["latest_job"]["provider_run_summaries"][0]
+    assert summary["raw_result_count"] == 3
+    assert summary["stored_result_count"] == 1
+    assert summary["filtered_result_count"] == 2
+    assert summary["note"] == "Filtered 2 low-signal, stale, or non-news result(s)."
 
 
 def test_all_static_results_are_filtered_without_failing_provider(

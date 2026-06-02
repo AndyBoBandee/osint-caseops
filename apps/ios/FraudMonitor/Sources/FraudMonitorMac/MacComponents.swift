@@ -1,4 +1,5 @@
 import FraudMonitorCore
+import AppKit
 import SwiftUI
 
 struct MacHeader: View {
@@ -28,50 +29,159 @@ struct MacConnectionBanner: View {
 
     var body: some View {
         MacCard(statusTitle, symbol: statusSymbol) {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: statusSymbol)
-                    .foregroundStyle(statusColor)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(statusTitle)
-                        .font(.headline)
-                    Text(statusDetail)
-                        .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: statusSymbol)
+                        .foregroundStyle(statusColor)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(statusTitle)
+                            .font(.headline)
+                        Text(statusDetail)
+                            .foregroundStyle(.secondary)
+                        Text("Base URL: \(store.baseURLText)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                    Spacer()
+                    Button {
+                        Task { await store.checkBackendHealth() }
+                    } label: {
+                        Label("Check Status", systemImage: "stethoscope")
+                    }
+                    .accessibilityLabel("Check local API status")
+                    .accessibilityHint("Checks the API and database health endpoints without starting or stopping the backend.")
                 }
-                Spacer()
+
+                Divider()
+
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    CopyCommandButton(title: "Copy make api", command: store.apiLaunchCommand)
+                    CopyCommandButton(title: "Copy fixture API", command: store.fixtureAPILaunchCommand)
+                    CopyCommandButton(title: "Copy make mac-run", command: store.macRunCommand)
+                }
+                .accessibilityElement(children: .contain)
             }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(statusTitle)
+            .accessibilityValue(statusDetail)
         }
     }
 
     private var statusSymbol: String {
-        switch store.phase {
-        case .failed: "exclamationmark.triangle.fill"
-        case .loading: "arrow.triangle.2.circlepath"
-        default: "checkmark.seal.fill"
+        switch store.backendConnectionState {
+        case .offline, .degraded: "exclamationmark.triangle.fill"
+        case .checking: "arrow.triangle.2.circlepath"
+        case .connected: "checkmark.seal.fill"
+        case .unknown:
+            switch store.phase {
+            case .failed: "exclamationmark.triangle.fill"
+            case .loading: "arrow.triangle.2.circlepath"
+            default: "checkmark.seal.fill"
+            }
         }
     }
 
     private var statusColor: Color {
-        switch store.phase {
-        case .failed: .orange
-        case .loading: .cyan
-        default: .green
+        switch store.backendConnectionState {
+        case .offline, .degraded: .orange
+        case .checking: .cyan
+        case .connected: .green
+        case .unknown:
+            switch store.phase {
+            case .failed: .orange
+            case .loading: .cyan
+            default: .green
+            }
         }
     }
 
     private var statusTitle: String {
-        switch store.phase {
-        case .failed: "API needs attention"
-        case .loading: "Syncing Fraud Monitor"
-        case .loaded: "Connected to Fraud Monitor"
-        case .idle: "Ready"
+        switch store.backendConnectionState {
+        case .offline: "Local API offline"
+        case .degraded: "Local API degraded"
+        case .checking: "Checking local API"
+        case .connected: "Local API connected"
+        case .unknown:
+            switch store.phase {
+            case .failed: "API needs attention"
+            case .loading: "Syncing Fraud Monitor"
+            case .loaded: "Connected to Fraud Monitor"
+            case .idle: "Ready"
+            }
         }
     }
 
     private var statusDetail: String {
-        if case .failed(let message) = store.phase {
-            return message
+        switch store.backendConnectionState {
+        case .offline(let message):
+            return "Could not reach \(store.baseURLText). \(message)"
+        case .degraded(let message):
+            return "\(message). Last checked \(store.lastBackendCheckText)."
+        case .checking:
+            return "Checking API and database health at \(store.baseURLText)."
+        case .connected:
+            return "API and database are healthy. \(store.dashboard.runtime.readyProviderCount) ready provider(s), \(store.dashboard.pendingResults) pending result(s). Last checked \(store.lastBackendCheckText)."
+        case .unknown:
+            if case .failed(let message) = store.phase {
+                return message
+            }
+            return "\(store.dashboard.runtime.readyProviderCount) ready provider(s), \(store.dashboard.pendingResults) pending result(s)"
         }
-        return "\(store.dashboard.runtime.readyProviderCount) ready provider(s), \(store.dashboard.pendingResults) pending result(s)"
+    }
+}
+
+struct CopyCommandButton: View {
+    let title: String
+    let command: String
+    @State private var copied = false
+
+    var body: some View {
+        Button {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(command, forType: .string)
+            copied = true
+        } label: {
+            Label(copied ? "Copied" : title, systemImage: copied ? "checkmark" : "doc.on.doc")
+        }
+        .buttonStyle(.bordered)
+        .accessibilityLabel(title)
+        .accessibilityHint("Copies \(command.replacingOccurrences(of: "\n", with: " ")) to the clipboard.")
+        .onChange(of: copied) { _, value in
+            guard value else { return }
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                copied = false
+            }
+        }
+    }
+}
+
+struct CompactStatusPill: View {
+    let text: String
+    let symbol: String?
+
+    init(_ text: String, symbol: String? = nil) {
+        self.text = text
+        self.symbol = symbol
+    }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if let symbol {
+                Image(systemName: symbol)
+                    .accessibilityHidden(true)
+            }
+            Text(text.displayLabel)
+                .lineLimit(1)
+        }
+        .font(.caption.weight(.semibold))
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(.secondary.opacity(0.12), in: Capsule())
+        .foregroundStyle(.secondary)
+        .accessibilityLabel(text.displayLabel)
     }
 }
 
@@ -141,6 +251,7 @@ struct StatusPill: View {
             .padding(.vertical, 4)
             .background(.cyan.opacity(0.16), in: Capsule())
             .foregroundStyle(.cyan)
+            .accessibilityLabel(text.displayLabel)
     }
 }
 
