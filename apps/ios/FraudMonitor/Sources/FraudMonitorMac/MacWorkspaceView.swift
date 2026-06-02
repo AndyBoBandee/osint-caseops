@@ -165,6 +165,7 @@ struct MacReviewQueueView: View {
     @Environment(FraudMonitorStore.self) private var store
     @State private var query = ""
     @State private var reviewFilter = "all"
+    @State private var showingDeleteAllConfirmation = false
 
     private var filteredResults: [NewsResult] {
         store.dashboard.results.filter { result in
@@ -219,6 +220,14 @@ struct MacReviewQueueView: View {
                 store.selectResult(id: filteredResults.first?.id)
             }
         }
+        .alert("Delete all queue results?", isPresented: $showingDeleteAllConfirmation) {
+            Button("Delete All", role: .destructive) {
+                Task { await store.deleteAllResults() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes every stored Review Queue result for the local monitor case, including saved evidence links and notes attached to those queue items.")
+        }
     }
 
     private var reviewToolbar: some View {
@@ -234,6 +243,15 @@ struct MacReviewQueueView: View {
             .accessibilityLabel("Review status filter")
 
             Spacer()
+
+            Button(role: .destructive) {
+                showingDeleteAllConfirmation = true
+            } label: {
+                Label(store.isDeletingQueue ? "Deleting" : "Delete All", systemImage: "trash")
+            }
+            .disabled(store.dashboard.results.isEmpty || store.isDeletingQueue)
+            .accessibilityLabel("Delete all queue results")
+            .accessibilityHint("Shows a confirmation before removing every stored Review Queue result.")
 
             if let selectedResult {
                 Text(selectedResult.shortSourceLabel)

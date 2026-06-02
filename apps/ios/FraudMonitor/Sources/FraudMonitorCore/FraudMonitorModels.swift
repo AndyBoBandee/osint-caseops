@@ -10,6 +10,14 @@ public struct DatabaseHealth: Codable, Sendable {
     public let database: String
 }
 
+public struct QueueDeleteResult: Codable, Sendable {
+    public let deletedCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case deletedCount = "deleted_count"
+    }
+}
+
 public struct DashboardData: Codable, Sendable {
     public let keyword: String
     public let providers: [ProviderInfo]

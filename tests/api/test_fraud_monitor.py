@@ -723,6 +723,40 @@ def test_review_and_evidence_wrappers_update_fraud_results(tmp_path: Path, monke
     assert refreshed["results"][0]["vault_state"] == "artifacts_available"
 
 
+def test_delete_all_results_clears_review_queue_and_attached_evidence(tmp_path: Path, monkeypatch) -> None:
+    def fake_search(keyword: str, provider: str) -> list[ProviderResult]:
+        return [fake_result(keyword, provider, 1), fake_result(keyword, provider, 2)]
+
+    monkeypatch.setattr(fraud_monitor, "search_public_news_with_provider", fake_search)
+
+    with make_client(tmp_path, monkeypatch, providers="gdelt") as client:
+        client.post("/fraud-monitor/jobs")
+        dashboard = client.get("/fraud-monitor/dashboard").json()
+        result_id = dashboard["results"][0]["id"]
+        client.patch(
+            f"/fraud-monitor/results/{result_id}",
+            json={"review_status": "relevant"},
+        )
+        client.post(
+            f"/fraud-monitor/results/{result_id}/evidence-links",
+            json={"analyst_note": "Evidence note to clear with the queue."},
+        )
+
+        delete_response = client.delete("/fraud-monitor/results")
+        cleared_dashboard = client.get("/fraud-monitor/dashboard").json()
+        second_delete_response = client.delete("/fraud-monitor/results")
+
+    assert delete_response.status_code == 200
+    assert delete_response.json() == {"deleted_count": 2}
+    assert cleared_dashboard["total_results"] == 0
+    assert cleared_dashboard["pending_results"] == 0
+    assert cleared_dashboard["relevant_results"] == 0
+    assert cleared_dashboard["evidence_count"] == 0
+    assert cleared_dashboard["results"] == []
+    assert second_delete_response.status_code == 200
+    assert second_delete_response.json() == {"deleted_count": 0}
+
+
 def test_saving_evidence_preserves_local_vault_artifacts_under_data_dir(
     tmp_path: Path,
     monkeypatch,

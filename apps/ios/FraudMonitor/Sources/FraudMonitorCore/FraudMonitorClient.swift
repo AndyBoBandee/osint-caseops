@@ -63,6 +63,10 @@ public struct FraudMonitorClient: Sendable {
         )
     }
 
+    public func deleteAllResults() async throws -> QueueDeleteResult {
+        try await request(path: "/fraud-monitor/results", method: "DELETE")
+    }
+
     private func request<Response: Decodable>(path: String, method: String) async throws -> Response {
         try await request(path: path, method: method, body: Optional<String>.none)
     }

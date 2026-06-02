@@ -30,6 +30,7 @@ public final class FraudMonitorStore {
     public var apiHealth: APIHealth?
     public var databaseHealth: DatabaseHealth?
     public var lastBackendCheckText = "Never"
+    public var isDeletingQueue = false
 
     public let apiLaunchCommand = "make api"
     public let fixtureAPILaunchCommand = """
@@ -135,6 +136,19 @@ public final class FraudMonitorStore {
             if selectedResult?.id == result.id {
                 draftEvidenceNote = note
             }
+            phase = .loaded
+        } catch {
+            phase = .failed(error.localizedDescription)
+        }
+    }
+
+    public func deleteAllResults() async {
+        isDeletingQueue = true
+        defer { isDeletingQueue = false }
+        do {
+            _ = try await client.deleteAllResults()
+            dashboard = try await client.dashboard()
+            selectResult(nil)
             phase = .loaded
         } catch {
             phase = .failed(error.localizedDescription)

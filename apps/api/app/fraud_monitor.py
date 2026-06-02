@@ -453,6 +453,10 @@ class OperationsCleanupResult(BaseModel):
     remaining_candidates: list[OperationsRetentionCandidate]
 
 
+class FraudMonitorQueueDeleteResult(BaseModel):
+    deleted_count: int
+
+
 def configured_providers() -> list[str]:
     settings = get_settings()
     providers = settings.fraud_monitor_providers or ["gdelt", "google_news_rss", "hn_algolia"]
@@ -2363,6 +2367,32 @@ def update_schedule(payload: FraudMonitorScheduleUpdate) -> FraudMonitorSchedule
     if row is None:
         raise RuntimeError("Fraud monitor schedule was not stored.")
     return row_to_schedule(dict(row))
+
+
+@router.delete("/results", response_model=FraudMonitorQueueDeleteResult)
+def delete_all_results() -> FraudMonitorQueueDeleteResult:
+    now = utc_now()
+    with connect() as connection:
+        settings = ensure_monitor_settings(connection)
+        case_id = settings["case_id"]
+        deleted_count = int(
+            connection.execute(
+                "SELECT COUNT(*) AS count FROM news_results WHERE case_id = ?",
+                (case_id,),
+            ).fetchone()["count"]
+        )
+        if deleted_count:
+            connection.execute("DELETE FROM news_results WHERE case_id = ?", (case_id,))
+            connection.execute("UPDATE cases SET updated_at = ? WHERE id = ?", (now, case_id))
+            record_timeline_event(
+                connection,
+                case_id=case_id,
+                event_type="review_update",
+                title="Review queue cleared",
+                summary=f"{deleted_count} result(s) deleted from the review queue.",
+                metadata={"deleted_count": deleted_count},
+            )
+    return FraudMonitorQueueDeleteResult(deleted_count=deleted_count)
 
 
 @router.patch("/results/{result_id}", response_model=NewsResultRecord)
