@@ -1,4 +1,5 @@
 import FraudMonitorCore
+import Foundation
 import SwiftUI
 
 struct MacWorkspaceView: View {
@@ -185,84 +186,26 @@ struct MacReviewQueueView: View {
 
             HSplitView {
                 VStack(spacing: 10) {
+                    QueueSummaryStrip(results: filteredResults)
+                        .padding(.horizontal, 16)
+
                     reviewToolbar
 
-                    Table(filteredResults, selection: resultSelection) {
-                        TableColumn("Source") { result in
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(result.title.isEmpty ? result.sourceURL : result.title)
-                                    .font(.callout.weight(.medium))
-                                    .lineLimit(1)
-                                Text(result.publisher.isEmpty ? result.provider.displayLabel : result.publisher)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-                            .accessibilityElement(children: .combine)
-                            .accessibilityLabel("Source \(result.title.isEmpty ? result.sourceURL : result.title)")
-                            .accessibilityValue(result.publisher.isEmpty ? result.provider.displayLabel : result.publisher)
+                    List(selection: resultSelection) {
+                        ForEach(filteredResults) { result in
+                            TriageLeadRow(result: result)
+                                .tag(result.id)
                         }
-                        .width(min: 240, ideal: 340)
-
-                        TableColumn("Provider") { result in
-                            Text(result.provider.displayLabel)
-                                .lineLimit(1)
-                                .accessibilityLabel("Provider \(result.provider.displayLabel)")
-                        }
-                        .width(min: 95, ideal: 120)
-
-                        TableColumn("Review") { result in
-                            CompactStatusPill(result.reviewStatus, symbol: reviewSymbol(for: result.reviewStatus))
-                                .accessibilityLabel("Review status")
-                                .accessibilityValue(result.reviewStatus.displayLabel)
-                        }
-                        .width(min: 100, ideal: 120)
-
-                        TableColumn("Category") { result in
-                            Text(result.fraudCategory.displayLabel)
-                                .lineLimit(1)
-                                .accessibilityLabel("Category \(result.fraudCategory.displayLabel)")
-                        }
-                        .width(min: 120, ideal: 150)
-
-                        TableColumn("Confidence") { result in
-                            Text(result.sourceConfidence.displayLabel)
-                                .lineLimit(1)
-                                .accessibilityLabel("Source confidence \(result.sourceConfidence.displayLabel)")
-                        }
-                        .width(min: 90, ideal: 110)
-
-                        TableColumn("State/Rail") { result in
-                            Text("\(result.state.isEmpty ? "Unknown" : result.state) / \(result.paymentRail.displayLabel)")
-                                .lineLimit(1)
-                                .accessibilityLabel("State and payment rail")
-                                .accessibilityValue("\(result.state.isEmpty ? "Unknown" : result.state), \(result.paymentRail.displayLabel)")
-                        }
-                        .width(min: 105, ideal: 130)
-
-                        TableColumn("Evidence") { result in
-                            CompactStatusPill(result.savedAsEvidence ? "Saved" : "Not saved", symbol: result.savedAsEvidence ? "link" : "link.badge.plus")
-                                .accessibilityLabel("Evidence state")
-                                .accessibilityValue(result.savedAsEvidence ? "Saved" : "Not saved")
-                        }
-                        .width(min: 90, ideal: 105)
-
-                        TableColumn("Retrieved") { result in
-                            Text(result.retrievedAt.readableDate)
-                                .lineLimit(1)
-                                .accessibilityLabel("Retrieved")
-                                .accessibilityValue(result.retrievedAt.readableDate)
-                        }
-                        .width(min: 140, ideal: 170)
                     }
+                    .listStyle(.inset)
                     .searchable(text: $query, prompt: "Search source, category, state")
-                    .accessibilityLabel("Review queue table")
-                    .accessibilityHint("Use the arrow keys to select a result, then use the inspector or Review menu actions.")
+                    .accessibilityLabel("Review queue")
+                    .accessibilityHint("Use the arrow keys to select a lead, then use the inspector or Review menu actions.")
                 }
-                .frame(minWidth: 720)
+                .frame(minWidth: 520)
 
                 ResultInspectorView(result: selectedResult)
-                    .frame(minWidth: 460)
+                    .frame(minWidth: 520)
             }
         }
         .onChange(of: filteredResults.map(\.id)) { _, ids in
@@ -293,12 +236,12 @@ struct MacReviewQueueView: View {
             Spacer()
 
             if let selectedResult {
-                Text(selectedResult.id)
-                    .font(.caption2.monospaced())
+                Text(selectedResult.shortSourceLabel)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .textSelection(.enabled)
-                    .accessibilityLabel("Selected result identifier")
+                    .accessibilityLabel("Selected source")
             }
         }
         .padding(.horizontal, 16)
@@ -315,13 +258,108 @@ struct MacReviewQueueView: View {
             set: { store.selectResult(id: $0) }
         )
     }
+}
 
-    private func reviewSymbol(for status: String) -> String {
-        switch status {
-        case "relevant": "checkmark.circle"
-        case "not_relevant": "xmark.circle"
-        default: "clock"
+struct QueueSummaryStrip: View {
+    let results: [NewsResult]
+
+    var body: some View {
+        HStack(spacing: 10) {
+            QueueSummaryItem(title: "Pending", value: count(reviewStatus: "pending"), symbol: "clock")
+            QueueSummaryItem(title: "Relevant", value: count(reviewStatus: "relevant"), symbol: "checkmark.circle")
+            QueueSummaryItem(title: "Evidence", value: results.filter(\.savedAsEvidence).count, symbol: "link")
+            QueueSummaryItem(title: "Needs Classification", value: results.filter(\.needsClassification).count, symbol: "tag")
+            QueueSummaryItem(title: "Official/High", value: results.filter(\.isOfficialOrHighConfidence).count, symbol: "checkmark.shield")
+            Spacer(minLength: 0)
         }
+        .accessibilityElement(children: .contain)
+    }
+
+    private func count(reviewStatus: String) -> Int {
+        results.filter { $0.reviewStatus == reviewStatus }.count
+    }
+}
+
+struct QueueSummaryItem: View {
+    let title: String
+    let value: Int
+    let symbol: String
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: symbol)
+                .foregroundStyle(.cyan)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("\(value)")
+                    .font(.headline)
+                Text(title)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .accessibilityLabel(title)
+        .accessibilityValue("\(value)")
+    }
+}
+
+struct TriageLeadRow: View {
+    let result: NewsResult
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(result.displayTitle)
+                    .font(.callout.weight(.semibold))
+                    .lineLimit(2)
+                Spacer(minLength: 8)
+                Text(result.reviewStatus.displayLabel)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(result.reviewStatus == "relevant" ? .green : .secondary)
+            }
+
+            HStack(spacing: 8) {
+                Text(result.publisherLabel)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Text(result.publishedAt.readableDate)
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                if result.shouldShowProvider {
+                    Text(result.provider.displayLabel)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+            }
+
+            Text(result.triageSummary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+
+            HStack(spacing: 6) {
+                CompactStatusPill(result.categoryCue, symbol: result.needsClassification ? "tag" : "tag.fill")
+                CompactStatusPill(result.sourceConfidence.displayLabel, symbol: result.isOfficialOrHighConfidence ? "checkmark.shield" : "antenna.radiowaves.left.and.right")
+                if !result.state.isEmpty {
+                    CompactStatusPill(result.state, symbol: "map")
+                }
+                if result.savedAsEvidence {
+                    CompactStatusPill("Evidence saved", symbol: "link")
+                }
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(.vertical, 8)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(result.displayTitle)
+        .accessibilityValue("\(result.publisherLabel), \(result.categoryCue), \(result.reviewStatus.displayLabel)")
     }
 }
 
@@ -333,43 +371,60 @@ struct ResultInspectorView: View {
         ScrollView {
             if let result {
                 VStack(alignment: .leading, spacing: 16) {
-                    MacHeader(title: "Result Detail", subtitle: result.publisher, symbol: "doc.text.magnifyingglass")
+                    ResultInspectorHeader(result: result)
 
                     MacCard("Source", symbol: "link") {
                         VStack(alignment: .leading, spacing: 10) {
-                            Text(result.title.isEmpty ? result.sourceURL : result.title)
-                                .font(.headline)
-                                .textSelection(.enabled)
-                            DetailRow("Provider", result.provider.displayLabel)
-                            DetailRow("Publisher", result.publisher)
-                            DetailRow("URL", result.sourceURL)
-                            if !result.publishedAt.isEmpty || !result.retrievedAt.isEmpty {
-                                Grid(alignment: .leading, horizontalSpacing: 28, verticalSpacing: 8) {
-                                    GridRow {
-                                        DetailRow("Published", result.publishedAt.readableDate)
-                                        DetailRow("Retrieved", result.retrievedAt.readableDate)
-                                    }
+                            DetailRow("Publisher", result.publisherLabel)
+                            DetailRow("Readable URL", result.shortSourceLabel)
+                            DisclosureGroup("Full source URL") {
+                                Text(result.sourceURL)
+                                    .font(.caption.monospaced())
+                                    .foregroundStyle(.secondary)
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            Grid(alignment: .leading, horizontalSpacing: 28, verticalSpacing: 8) {
+                                GridRow {
+                                    DetailRow("Published", result.publishedAt.readableDate)
+                                    DetailRow("Retrieved", result.retrievedAt.readableDate)
                                 }
                             }
-                            Text(result.snippet.isEmpty ? "No provider snippet returned." : result.snippet)
+                            Text(result.cleanedSnippet.isEmpty ? "No provider snippet returned." : result.cleanedSnippet)
                                 .foregroundStyle(.secondary)
                                 .textSelection(.enabled)
                         }
                     }
 
-                    MacCard("Classification", symbol: "tag") {
-                        Grid(alignment: .leading, horizontalSpacing: 28, verticalSpacing: 10) {
-                            GridRow {
-                                DetailRow("Category", result.fraudCategory.displayLabel)
-                                DetailRow("Payment rail", result.paymentRail.displayLabel)
+                    MacCard("Classification & Credibility", symbol: "tag") {
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack(spacing: 8) {
+                                CompactStatusPill(result.categoryCue, symbol: result.needsClassification ? "tag" : "tag.fill")
+                                CompactStatusPill(result.sourceConfidence.displayLabel, symbol: result.isOfficialOrHighConfidence ? "checkmark.shield" : "antenna.radiowaves.left.and.right")
+                                CompactStatusPill(result.classificationConfidence.displayLabel, symbol: "dial.low")
                             }
-                            GridRow {
-                                DetailRow("Victim segment", result.victimSegment.displayLabel)
-                                DetailRow("Confidence", result.classificationConfidence)
-                            }
-                            GridRow {
-                                DetailRow("Source type", result.sourceType.displayLabel)
-                                DetailRow("Source confidence", result.sourceConfidence)
+
+                            Text(result.queueReason)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+
+                            Grid(alignment: .leading, horizontalSpacing: 28, verticalSpacing: 10) {
+                                GridRow {
+                                    DetailRow("Category", result.fraudCategory.displayLabel)
+                                    DetailRow("Payment rail", result.paymentRail.displayLabel)
+                                }
+                                GridRow {
+                                    DetailRow("Victim segment", result.victimSegment.displayLabel)
+                                    DetailRow("Confidence", result.classificationConfidence)
+                                }
+                                GridRow {
+                                    DetailRow("Source type", result.sourceType.displayLabel)
+                                    DetailRow("Source confidence", result.sourceConfidence)
+                                }
+                                GridRow {
+                                    DetailRow("State", result.state.isEmpty ? "Unknown" : result.state)
+                                    DetailRow("Provider", result.provider.displayLabel)
+                                }
                             }
                         }
                     }
@@ -411,6 +466,44 @@ struct ResultInspectorView: View {
     }
 }
 
+struct ResultInspectorHeader: View {
+    let result: NewsResult
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "doc.text.magnifyingglass")
+                    .font(.title2)
+                    .foregroundStyle(.cyan)
+                    .frame(width: 30, height: 30)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(result.displayTitle)
+                        .font(.title2.bold())
+                        .lineLimit(3)
+                        .textSelection(.enabled)
+                    Text(result.publisherLabel)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    Text(result.shortSourceLabel)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .textSelection(.enabled)
+                }
+                Spacer()
+            }
+            HStack(spacing: 6) {
+                CompactStatusPill(result.reviewStatus.displayLabel, symbol: result.reviewSymbol)
+                CompactStatusPill(result.savedAsEvidence ? "Evidence saved" : "Evidence not saved", symbol: result.savedAsEvidence ? "link" : "link.badge.plus")
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Result detail")
+        .accessibilityValue("\(result.displayTitle), \(result.publisherLabel)")
+    }
+}
+
 struct EvidenceNoteEditor: View {
     @Bindable var store: FraudMonitorStore
     let result: NewsResult
@@ -447,5 +540,94 @@ struct EvidenceNoteEditor: View {
             .accessibilityLabel("Save evidence note")
             .accessibilityHint("Saves the current analyst note as evidence for the selected result.")
         }
+    }
+}
+
+extension NewsResult {
+    var displayTitle: String {
+        title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? shortSourceLabel : title.cleanedHTMLText
+    }
+
+    var publisherLabel: String {
+        publisher.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? provider.displayLabel : publisher.cleanedHTMLText
+    }
+
+    var cleanedSnippet: String {
+        snippet.cleanedHTMLText
+    }
+
+    var categoryCue: String {
+        needsClassification ? "Needs classification" : fraudCategory.displayLabel
+    }
+
+    var needsClassification: Bool {
+        fraudCategory.isEmpty || fraudCategory == "unknown"
+    }
+
+    var isOfficialOrHighConfidence: Bool {
+        sourceConfidence == "high" || sourceType.hasPrefix("official_")
+    }
+
+    var shouldShowProvider: Bool {
+        provider != "google_news_rss" && provider != publisher
+    }
+
+    var shortSourceLabel: String {
+        guard let components = URLComponents(string: sourceURL), let host = components.host else {
+            return sourceURL
+        }
+        let cleanHost = host.replacingOccurrences(of: "www.", with: "")
+        if cleanHost == "news.google.com", components.path.hasPrefix("/rss/articles") {
+            return "Google News RSS link"
+        }
+        let path = components.path
+        if path.isEmpty || path == "/" {
+            return cleanHost
+        }
+        let trimmedPath = path.count > 48 ? "\(path.prefix(45))..." : path
+        return "\(cleanHost)\(trimmedPath)"
+    }
+
+    var triageSummary: String {
+        cleanedSnippet.isEmpty ? queueReason : cleanedSnippet
+    }
+
+    var queueReason: String {
+        var cues: [String] = []
+        cues.append(needsClassification ? "Needs analyst classification" : "Classified as \(fraudCategory.displayLabel)")
+        cues.append(isOfficialOrHighConfidence ? "Higher-confidence source" : "Public-source lead")
+        if !state.isEmpty {
+            cues.append("State: \(state)")
+        }
+        if paymentRail != "unknown" && !paymentRail.isEmpty {
+            cues.append("Payment rail: \(paymentRail.displayLabel)")
+        }
+        return cues.joined(separator: "; ")
+    }
+
+    var reviewSymbol: String {
+        switch reviewStatus {
+        case "relevant": "checkmark.circle"
+        case "not_relevant": "xmark.circle"
+        default: "clock"
+        }
+    }
+}
+
+extension String {
+    var cleanedHTMLText: String {
+        var text = replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
+        let replacements = [
+            "&nbsp;": " ",
+            "&amp;": "&",
+            "&quot;": "\"",
+            "&#39;": "'",
+            "&lt;": "<",
+            "&gt;": ">",
+        ]
+        for (entity, value) in replacements {
+            text = text.replacingOccurrences(of: entity, with: value)
+        }
+        return text.split(separator: " ").joined(separator: " ")
     }
 }
