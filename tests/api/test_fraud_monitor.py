@@ -156,11 +156,19 @@ def test_detailed_fraud_job_requires_brave_key_without_running_free_providers(
 
 
 def test_brave_provider_uses_clean_query_and_keyed_readiness(tmp_path: Path, monkeypatch) -> None:
-    assert (
-        news_monitoring.build_provider_query("fraud", "brave")
-        == "fraud (report OR warning OR investigation OR charged OR lawsuit OR enforcement)"
+    assert news_monitoring.build_provider_query("fraud", "brave") == (
+        "(fraud OR scam OR theft OR impersonation OR phishing OR \"financial crime\" OR \"organized crime\") "
+        "(warning OR report OR investigation OR charged OR enforcement OR arrest)"
     )
-    assert news_monitoring.build_provider_query("fraud", "hn_algolia") == "fraud"
+    assert news_monitoring.build_provider_query("fraud", "gdelt") == news_monitoring.build_provider_query(
+        "fraud",
+        "brave",
+    )
+    assert news_monitoring.build_provider_query("fraud", "google_news_rss").endswith(" when:30d")
+    assert news_monitoring.build_provider_query("fraud", "hn_algolia") == (
+        "fraud scam theft impersonation phishing financial crime"
+    )
+    assert news_monitoring.build_provider_query("impersonation scam", "hn_algolia") == "impersonation scam"
 
     with make_client(tmp_path, monkeypatch, providers="brave", brave_key=None) as client:
         missing_dashboard = client.get("/fraud-monitor/dashboard").json()

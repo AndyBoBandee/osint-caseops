@@ -1001,10 +1001,30 @@ def fetch_json(url: str, headers: dict[str, str] | None = None) -> dict[str, Any
         raise RuntimeError(f"News provider request failed: {exc}") from exc
 
 
+CRIME_ACTIVITY_BOOLEAN_QUERY = (
+    "(fraud OR scam OR theft OR impersonation OR phishing OR \"financial crime\" OR \"organized crime\") "
+    "(warning OR report OR investigation OR charged OR enforcement OR arrest)"
+)
+CRIME_ACTIVITY_DISCUSSION_QUERY = "fraud scam theft impersonation phishing financial crime"
+CRIME_ACTIVITY_GOOGLE_NEWS_QUERY = f"{CRIME_ACTIVITY_BOOLEAN_QUERY} when:30d"
+
+
 def build_provider_query(keyword: str, provider: str) -> str:
     cleaned_keyword = normalize_keyword(keyword)
-    if provider.lower() == "brave" and cleaned_keyword == "fraud":
-        return "fraud (report OR warning OR investigation OR charged OR lawsuit OR enforcement)"
+    normalized_provider = provider.lower()
+    if cleaned_keyword == "fraud":
+        if normalized_provider == "hn_algolia":
+            return CRIME_ACTIVITY_DISCUSSION_QUERY
+        if normalized_provider == "google_news_rss":
+            return CRIME_ACTIVITY_GOOGLE_NEWS_QUERY
+        if normalized_provider in {
+            "brave",
+            "gdelt",
+            "gdelt_doc",
+            "doj_news",
+            "cfpb_complaints",
+        }:
+            return CRIME_ACTIVITY_BOOLEAN_QUERY
     return cleaned_keyword
 
 

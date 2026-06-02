@@ -89,7 +89,8 @@ data/cases/{case_id}/
 ## Fraud Monitor Providers
 
 The current app surface is the Fraud Monitor dashboard. It uses passive HTTP GET requests to public
-search providers for the fixed keyword `fraud`. Default providers are the no-key options:
+search providers for a fixed public crime-activity monitor query. Default providers are the no-key
+options:
 
 - `gdelt` for the GDELT document API.
 - `google_news_rss` for Google News RSS search.
@@ -123,10 +124,10 @@ Provider behavior is deliberately passive and bounded:
 
 | Provider | External request | Configuration | Per-run request limit | Timeout | Safety limit |
 | --- | --- | --- | --- | --- | --- |
-| `gdelt` | `GET https://api.gdeltproject.org/api/v2/doc/doc` | No key | Up to `min(OSINT_CASEOPS_NEWS_MAX_RESULTS, 50)` results for the fixed keyword | 8 seconds | Public document API only; no scraping, login, or private data access. |
-| `google_news_rss` | `GET https://news.google.com/rss/search` | No key | Up to `min(OSINT_CASEOPS_NEWS_MAX_RESULTS, 50)` RSS items for the fixed keyword | 8 seconds | Public RSS search only; snippets and links are leads for analyst review. |
-| `hn_algolia` | `GET https://hn.algolia.com/api/v1/search` | No key | Up to `min(OSINT_CASEOPS_NEWS_MAX_RESULTS, 50)` story hits for the fixed keyword | 8 seconds | Public Hacker News search only; comments or stories are not automated claims. |
-| `brave` | `GET https://api.search.brave.com/res/v1/news/search` | `BRAVE_SEARCH_API_KEY` required | Up to `min(OSINT_CASEOPS_NEWS_MAX_RESULTS, 20)` news results for the fixed keyword | 8 seconds | Optional provider; API key must stay local and out of commits. |
+| `gdelt` | `GET https://api.gdeltproject.org/api/v2/doc/doc` | No key | Up to `min(OSINT_CASEOPS_NEWS_MAX_RESULTS, 50)` crime-activity results | 8 seconds | Public document API only; no scraping, login, or private data access. |
+| `google_news_rss` | `GET https://news.google.com/rss/search` | No key | Up to `min(OSINT_CASEOPS_NEWS_MAX_RESULTS, 50)` recent RSS items | 8 seconds | Public RSS search only; snippets and links are leads for analyst review. |
+| `hn_algolia` | `GET https://hn.algolia.com/api/v1/search` | No key | Up to `min(OSINT_CASEOPS_NEWS_MAX_RESULTS, 50)` story hits for crime-activity terms | 8 seconds | Public Hacker News search only; comments or stories are not automated claims. |
+| `brave` | `GET https://api.search.brave.com/res/v1/news/search` | `BRAVE_SEARCH_API_KEY` required | Up to `min(OSINT_CASEOPS_NEWS_MAX_RESULTS, 20)` news results for crime-activity terms | 8 seconds | Optional provider; API key must stay local and out of commits. |
 | `fixture` | None | `OSINT_CASEOPS_ENABLE_FIXTURE_PROVIDER=1` required | Up to 2 deterministic local records | Not networked | Test-only public-source-style data for smoke and fixture coverage. |
 | `doj_news` | `GET https://www.justice.gov/api/v1/press_releases.json` | No key | Up to `min(OSINT_CASEOPS_NEWS_MAX_RESULTS, 50)` results | 8 seconds | Official metadata and summaries only; no article-body scraping. |
 | `cfpb_complaints` | `GET https://www.consumerfinance.gov/data-research/consumer-complaints/search/api/v1/` | No key | Up to `min(OSINT_CASEOPS_NEWS_MAX_RESULTS, 50)` records | 8 seconds | Public complaint metadata only; consumer narratives and PII are not stored. |
@@ -134,12 +135,15 @@ Provider behavior is deliberately passive and bounded:
 | `ftc_consumer_sentinel_import` | Local CSV import | `OSINT_CASEOPS_FTC_CONSUMER_SENTINEL_PATH` | Up to `min(OSINT_CASEOPS_NEWS_MAX_RESULTS, 100)` rows | Not networked | Aggregate annual data imports only; no raw narratives. |
 
 The Fraud Monitor uses provider-specific query text before each request. Standard scans use the
-configured no-key providers. Detailed searches use Brave only when requested and receive a
-report-oriented query for the fixed keyword: `fraud (report OR warning OR investigation OR charged OR lawsuit OR enforcement)`.
-Before storing results, the API deterministically filters obvious static assets and non-news records
-such as JavaScript, CSS, image/font/document files, `/static/` or `/assets/` paths, CDN-style asset
-URLs, and empty title/snippet records that do not look like article or report URLs. Filtering is local
-and does not fetch or scrape result pages.
+configured no-key providers. Default monitor runs broaden the old plain `fraud` keyword into
+crime-activity terms such as fraud, scam, theft, impersonation, phishing, financial crime, and
+organized crime, paired with reporting/enforcement terms such as warning, report, investigation,
+charged, enforcement, and arrest. Google News RSS also receives a `when:30d` recency hint, while
+Hacker News receives plain terms instead of boolean operators. Detailed searches use Brave only when
+requested and receive the same crime-activity intent with Brave freshness controls. Before storing
+results, the API deterministically filters obvious static assets, non-news records, low-signal media
+or social hosts, and stale general results. Filtering is local and does not fetch or scrape result
+pages.
 
 Provider health uses explicit states in the dashboard:
 
